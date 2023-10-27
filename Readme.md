@@ -3,7 +3,7 @@
 ## 文件结构
 
 ```
-mon/
+gpmon/
 │
 ├── cmd/
 │   ├── mon-client/
