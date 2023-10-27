@@ -1,0 +1,75 @@
+项目mon最新的`grpc/server.go`文件如下, 请保存,后续更新以此为基础
+```
+// grpc/server.go
+package grpc
+
+import (
+	"context"
+	"log"
+	"mon/db"
+	"mon/grpc/proto"
+	"mon/utils"
+	"time"
+)
+
+type Server struct {
+	proto.UnimplementedDatabaseStatusServiceServer
+}
+
+type ClientInfoServer struct {
+	proto.UnimplementedClientInfoServiceServer
+}
+
+// type Server struct{}
+
+func (s *Server) SendStatus(ctx context.Context, status *proto.DatabaseStatus) (*proto.DatabaseStatusResponse, error) {
+	// Adjust timestamp to consider local timezone
+	localTimestamp := status.Timestamp.AsTime().In(time.Local)
+	log.Printf("%s,%s,%s,%s,%s", status.Ip, status.Dbtype, status.Dbnm, status.Status, status.Details)
+
+	if status.Status == "ERROR" {
+		emailContent := "Alert! Database Error detected.\n"
+		emailContent += "IP Address: " + status.Ip + "\n"
+		emailContent += "DB Type: " + status.Dbtype + "\n"
+		emailContent += "DB Name: " + status.Dbnm + "\n"
+		emailContent += "Details: " + status.Details + "\n"
+		emailContent += "Timestamp: " + localTimestamp.String()
+		log.Printf("emailContent: ", emailContent)
+		go utils.SendEmail("Database Monitoring Alert", emailContent)
+	}
+	err := db.InsertMessage(status.Status, status.Details, status.Ip, status.Dbtype, status.Dbnm, status.Timestamp.AsTime())
+	if err != nil {
+		log.Printf("Failed to insert message into the database: %v", err)
+		return &proto.DatabaseStatusResponse{
+			Message: "Failed to insert message into the database.",
+		}, err
+	}
+
+	return &proto.DatabaseStatusResponse{
+		Message: "Message received and saved successfully.",
+	}, nil
+}
+
+// type ClientInfoServer struct{}
+
+func (c *ClientInfoServer) GetClientInfo(ctx context.Context, req *proto.ClientInfoRequest) (*proto.ClientInfoResponse, error) {
+	// Using DbType as the lookup key in GetClientInfo
+	ip, port, dbType, dbName, dbUser, userPwd, err := db.GetClientInfo(req.DbType)
+
+	if err != nil {
+		log.Printf("Failed to retrieve client info from the database: %v", err)
+		return nil, err
+	}
+
+	return &proto.ClientInfoResponse{
+		Ip:       ip,
+		Port:     int32(port), // Convert the integer port to int32 to match the protobuf definition
+		DbType:   dbType,
+		DbName:   dbName,
+		DbUser:   dbUser,
+		UserPwd:  userPwd,
+		IsEnable: true, // Assuming the retrieved client is always enabled. Adjust as needed.
+	}, nil
+}
+
+```

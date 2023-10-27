@@ -1,0 +1,44 @@
+syntax = "proto3";
+option go_package = "./proto";
+package proto;
+
+import "google/protobuf/timestamp.proto";
+
+service DatabaseStatusService {
+    rpc SendStatus (DatabaseStatus) returns (DatabaseStatusResponse);
+}
+
+service ClientInfoService {
+    rpc GetClientInfo (ClientInfoRequest) returns (ClientInfoResponse);
+}
+
+message DatabaseStatus {
+    string status = 1;
+    string details = 2;
+    string ip = 3;
+    string dbtype = 4;
+    string dbnm = 5;
+    google.protobuf.Timestamp timestamp = 6;
+}
+
+message DatabaseStatusResponse {
+    string message = 1;
+}
+
+message ClientInfoRequest {
+    string DbType = 1; // Use dbtype as the request parameter
+}
+
+message ClientInfoResponse {
+    repeated ClientInfo clientInfos = 1;
+}
+
+message ClientInfo {
+    string Ip = 1;
+    int32 Port = 2;
+    string DbType = 3;
+    string DbName = 4;
+    string DbUser = 5;
+    string UserPwd = 6;
+    bool IsEnable = 7;
+}

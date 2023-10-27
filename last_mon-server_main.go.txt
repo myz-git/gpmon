@@ -1,0 +1,42 @@
+项目mon最新的`cmd/mon-server/main.go`文件如下, 请保存,后续更新以此为基础
+```
+// cmd/mon-server/main.go
+/*
+这段代码主要做的是创建一个gRPC服务器，并在端口:5051上监听。
+它同时注册了DatabaseStatusService和ClientInfoService服务，并使用对应的处理器（handler）来处理来自客户端的请求。
+当服务器启动并准备好接受请求时，它将在控制台上打印一个消息。
+*/
+package main
+
+import (
+	"log"
+	monGrpc "mon/grpc" // 别名用于避免命名冲突
+	"mon/grpc/proto"
+	"net"
+
+	"google.golang.org/grpc"
+)
+
+func main() {
+	lis, err := net.Listen("tcp", ":5051") // 你可以根据需要更改端口
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+
+	grpcServer := grpc.NewServer()
+
+	// 注册服务时使用正确的处理器
+	serverHandler := &monGrpc.Server{}
+	clientHandler := &monGrpc.ClientInfoServer{}
+	// monGrpc.RegisterDatabaseStatusServiceServer(grpcServer, serverHandler)
+	// proto.RegisterDatabaseStatusServiceServer(grpcServer, serverHandler)
+	proto.RegisterDatabaseStatusServiceServer(grpcServer, serverHandler)
+	proto.RegisterClientInfoServiceServer(grpcServer, clientHandler)
+
+	log.Println("Server started on :5051")
+	if err := grpcServer.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
+}
+
+```
