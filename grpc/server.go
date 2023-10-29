@@ -31,9 +31,9 @@ func (s *Server) SendStatus(ctx context.Context, status *proto.DatabaseStatus) (
 		emailContent += "Details: " + status.Details + "\n"
 		emailContent += "Timestamp: " + localTimestamp.String()
 		log.Printf("emailContent: ", emailContent)
-		go utils.SendEmail("Database Monitoring Alert", emailContent)
+		go utils.SendEmail(status.Ip, status.Dbtype, status.Dbnm, "Database Monitoring Alert", emailContent)
 	}
-	err := db.InsertMessage(status.Status, status.Details, status.Ip, status.Dbtype, status.Dbnm, status.Timestamp.AsTime())
+	err := db.InsertMessage(status.Status, status.Details, status.Ip, status.Dbtype, status.Dbnm)
 	if err != nil {
 		log.Printf("Failed to insert message into the database: %v", err)
 		return &proto.DatabaseStatusResponse{

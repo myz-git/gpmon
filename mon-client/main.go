@@ -1,5 +1,4 @@
 // mon-client/main.go
-
 package main
 
 import (
@@ -52,9 +51,29 @@ func main() {
 
 		// 2. Perform Database Check
 		status, details, err := db.CheckDatabaseStatus(DSN)
-		if status == "" || err != nil {
+		if err != nil {
 			log.Printf("Failed to get database status for IP %s. Error: %v", clientInfo.Ip, err)
+			// Update CLIENT_INFO with ERROR status
+			err = db.UpdateClientInfoOnError(clientInfo.Ip, clientInfo.DbName, clientInfo.DbType)
+			if err != nil {
+				log.Printf("Failed to update client info for IP %s with ERROR status. Error: %v", clientInfo.Ip, err)
+			}
 			continue
+		}
+
+		// Assume the database status check returns a status of "OK" or "ERROR"
+		if status == "OK" {
+			// Update CLIENT_INFO with OK status
+			err = db.UpdateClientInfoOnSuccess(clientInfo.Ip, clientInfo.DbName, clientInfo.DbType)
+			if err != nil {
+				log.Printf("Failed to update client info for IP %s with OK status. Error: %v", clientInfo.Ip, err)
+			}
+		} else {
+			// Update CLIENT_INFO with ERROR status
+			err = db.UpdateClientInfoOnError(clientInfo.Ip, clientInfo.DbName, clientInfo.DbType)
+			if err != nil {
+				log.Printf("Failed to update client info for IP %s with ERROR status. Error: %v", clientInfo.Ip, err)
+			}
 		}
 
 		// 3. Prepare message to send

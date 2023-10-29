@@ -22,13 +22,13 @@ func init() {
 	_, err = db.Exec(`
 	CREATE TABLE IF NOT EXISTS messages (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		status TEXT,
+		status varchar(10),
 		details TEXT,
-		ip TEXT,
-		dbtype TEXT,
-		dbnm TEXT,
-		timestamp DATETIME
-	)
+		ip varchar(20),
+		dbtype varchar(10),
+		dbnm varchar(20),
+		timestamp  DATETIME DEFAULT (datetime('now','localtime'))
+	  )
 	`)
 
 	if err != nil {
@@ -37,11 +37,11 @@ func init() {
 }
 
 // InsertMessage inserts a new message into the database.
-func InsertMessage(status, details, ip, dbtype, dbnm string, timestamp time.Time) error {
+func InsertMessage(status, details, ip, dbtype, dbnm string) error {
 	_, err := db.Exec(`
-	INSERT INTO messages (status, details, ip, dbtype, dbnm, timestamp) 
-	VALUES (?, ?, ?, ?, ?, ?)
-	`, status, details, ip, dbtype, dbnm, timestamp)
+	INSERT INTO messages (status, details, ip, dbtype, dbnm) 
+	VALUES (?, ?, ?, ?, ?)
+	`, status, details, ip, dbtype, dbnm)
 	return err
 }
 
@@ -77,7 +77,7 @@ type ClientConfig struct {
 func UpdateClientInfoOnError(ip string, dbName string, dbType string) error {
 	_, err := db.Exec(`
         UPDATE client_info 
-        SET status = 'ERROR', updatetm = CURRENT_TIMESTAMP
+        SET status = 'ERROR', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime')
         WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
 	return err
 }
@@ -85,7 +85,39 @@ func UpdateClientInfoOnError(ip string, dbName string, dbType string) error {
 func UpdateClientInfoOnSuccess(ip string, dbName string, dbType string) error {
 	_, err := db.Exec(`
         UPDATE client_info 
-        SET status = 'OK', updatetm = CURRENT_TIMESTAMP
+        SET status = 'OK', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime')
+        WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
+	return err
+}
+
+// UpdateClientInfoIsMail updates the 'ismail' field in the 'client_info' table.
+func UpdateClientInfoIsMail(ip string, dbType string, dbName string, isMail int) error {
+	_, err := db.Exec(`
+		UPDATE client_info 
+		SET ismail = ?
+		WHERE ip = ? AND dbname = ? AND dbtype = ?`, isMail, ip, dbName, dbType)
+	return err
+}
+
+func ShouldSendEmail(ip string, dbType string, dbName string) bool {
+	var lastEmailSent time.Time
+	err := db.QueryRow(`
+        SELECT last_email_sent FROM client_info 
+        WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType).Scan(&lastEmailSent)
+
+	if err != nil {
+		// 处理错误，可能是因为记录不存在
+	}
+
+	// 设定邮件发送的冷却期为1小时
+	return time.Since(lastEmailSent) > time.Hour
+}
+
+// 更新邮件发送时间的函数
+func UpdateLastEmailSent(ip string, dbType string, dbName string) error {
+	_, err := db.Exec(`
+        UPDATE client_info 
+        SET last_email_sent = datetime(CURRENT_TIMESTAMP, 'localtime')
         WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
 	return err
 }
