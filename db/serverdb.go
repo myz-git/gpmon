@@ -77,7 +77,7 @@ type ClientConfig struct {
 func UpdateClientInfoOnError(ip string, dbName string, dbType string) error {
 	_, err := db.Exec(`
         UPDATE client_info 
-        SET isok = 0, updatetm = CURRENT_TIMESTAMP
+        SET status = 'ERROR', updatetm = CURRENT_TIMESTAMP
         WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
 	return err
 }
@@ -85,7 +85,7 @@ func UpdateClientInfoOnError(ip string, dbName string, dbType string) error {
 func UpdateClientInfoOnSuccess(ip string, dbName string, dbType string) error {
 	_, err := db.Exec(`
         UPDATE client_info 
-        SET isok = 1, updatetm = CURRENT_TIMESTAMP
+        SET status = 'OK', updatetm = CURRENT_TIMESTAMP
         WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
 	return err
 }
