@@ -9,7 +9,7 @@ import (
 )
 
 func CheckDatabaseStatus(DSN string) (status string, details string, err error) {
-	DSN = DSN + "  as sysdba"
+	// DSN = DSN + "  as sysdba"
 	db, err := sql.Open("godror", DSN)
 	if err != nil {
 		return "", "", fmt.Errorf("cannot connect to database: %v", err)
@@ -23,19 +23,4 @@ func CheckDatabaseStatus(DSN string) (status string, details string, err error) 
 	}
 
 	return "OK", "Database is healthy", nil
-}
-func UpdateClientInfoOnError(ip, dbType string) error {
-	_, err := db.Exec(`
-        UPDATE client_info 
-        SET isok = 0, updatetm = CURRENT_TIMESTAMP
-        WHERE ip = ? AND dbtype = ?`, ip, dbType)
-	return err
-}
-
-func UpdateClientInfoOnSuccess(ip, dbType string) error {
-	_, err := db.Exec(`
-        UPDATE client_info 
-        SET isok = 1, updatetm = CURRENT_TIMESTAMP
-        WHERE ip = ? AND dbtype = ?`, ip, dbType)
-	return err
 }

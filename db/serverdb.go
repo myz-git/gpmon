@@ -13,7 +13,7 @@ var db *sql.DB
 
 func init() {
 	var err error
-	db, err = sql.Open("sqlite3", "./messages.db")
+	db, err = sql.Open("sqlite3", "D:\\Workspace\\gpmon\\messages.db")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
@@ -72,4 +72,20 @@ type ClientConfig struct {
 	DbName  string
 	DbUser  string
 	UserPwd string
+}
+
+func UpdateClientInfoOnError(ip string, dbName string, dbType string) error {
+	_, err := db.Exec(`
+        UPDATE client_info 
+        SET isok = 0, updatetm = CURRENT_TIMESTAMP
+        WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
+	return err
+}
+
+func UpdateClientInfoOnSuccess(ip string, dbName string, dbType string) error {
+	_, err := db.Exec(`
+        UPDATE client_info 
+        SET isok = 1, updatetm = CURRENT_TIMESTAMP
+        WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
+	return err
 }
