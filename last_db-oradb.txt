@@ -1,3 +1,5 @@
+如下是项目gpmon当前的`db/oradb.go`文件, 请保存,后续更新以此为基础
+```
 // db/oradb.go
 package db
 
@@ -39,3 +41,5 @@ func UpdateClientInfoOnSuccess(ip, dbType string) error {
         WHERE ip = ? AND dbtype = ?`, ip, dbType)
 	return err
 }
+
+```

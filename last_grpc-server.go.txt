@@ -1,14 +1,14 @@
-项目mon最新的`grpc/server.go`文件如下, 请保存,后续更新以此为基础
+如下是项目gpmon当前的`grpc/server.go`文件, 请保存,后续更新以此为基础
 ```
 // grpc/server.go
 package grpc
 
 import (
 	"context"
+	"gpmon/db"
+	"gpmon/grpc/proto"
+	"gpmon/utils"
 	"log"
-	"mon/db"
-	"mon/grpc/proto"
-	"mon/utils"
 	"time"
 )
 
@@ -19,8 +19,6 @@ type Server struct {
 type ClientInfoServer struct {
 	proto.UnimplementedClientInfoServiceServer
 }
-
-// type Server struct{}
 
 func (s *Server) SendStatus(ctx context.Context, status *proto.DatabaseStatus) (*proto.DatabaseStatusResponse, error) {
 	// Adjust timestamp to consider local timezone
@@ -50,26 +48,29 @@ func (s *Server) SendStatus(ctx context.Context, status *proto.DatabaseStatus) (
 	}, nil
 }
 
-// type ClientInfoServer struct{}
-
 func (c *ClientInfoServer) GetClientInfo(ctx context.Context, req *proto.ClientInfoRequest) (*proto.ClientInfoResponse, error) {
-	// Using DbType as the lookup key in GetClientInfo
-	ip, port, dbType, dbName, dbUser, userPwd, err := db.GetClientInfo(req.DbType)
-
+	clients, err := db.GetClientInfos(req.DbType) // Adjusted function name
 	if err != nil {
 		log.Printf("Failed to retrieve client info from the database: %v", err)
 		return nil, err
 	}
 
-	return &proto.ClientInfoResponse{
-		Ip:       ip,
-		Port:     int32(port), // Convert the integer port to int32 to match the protobuf definition
-		DbType:   dbType,
-		DbName:   dbName,
-		DbUser:   dbUser,
-		UserPwd:  userPwd,
-		IsEnable: true, // Assuming the retrieved client is always enabled. Adjust as needed.
-	}, nil
+	var clientInfos []*proto.ClientInfo
+	for _, client := range clients {
+		clientInfo := &proto.ClientInfo{
+			Ip:       client.IP,
+			Port:     int32(client.Port),
+			DbType:   client.DbType,
+			DbName:   client.DbName,
+			DbUser:   client.DbUser,
+			UserPwd:  client.UserPwd,
+			IsEnable: true,
+		}
+		clientInfos = append(clientInfos, clientInfo)
+	}
+
+	return &proto.ClientInfoResponse{ClientInfos: clientInfos}, nil
 }
+
 
 ```

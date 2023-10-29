@@ -1,76 +1,80 @@
-项目mon最新的`db/serverdb.go`文件如下,请在此基础上调整更新
+如下是项目gpmon当前的`db/serverdb.go`文件, 请保存,后续更新以此为基础
 ```
 // db/serverdb.go
-// grpc/server.go
-package grpc
+package db
 
 import (
-	"context"
+	"database/sql"
 	"log"
-	"mon/db"
-	"mon/grpc/proto"
-	"mon/utils"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
-type Server struct {
-	proto.UnimplementedDatabaseStatusServiceServer
-}
+var db *sql.DB
 
-type ClientInfoServer struct {
-	proto.UnimplementedClientInfoServiceServer
-}
-
-func (s *Server) SendStatus(ctx context.Context, status *proto.DatabaseStatus) (*proto.DatabaseStatusResponse, error) {
-	// Adjust timestamp to consider local timezone
-	localTimestamp := status.Timestamp.AsTime().In(time.Local)
-	log.Printf("%s,%s,%s,%s,%s", status.Ip, status.Dbtype, status.Dbnm, status.Status, status.Details)
-
-	if status.Status == "ERROR" {
-		emailContent := "Alert! Database Error detected.\n"
-		emailContent += "IP Address: " + status.Ip + "\n"
-		emailContent += "DB Type: " + status.Dbtype + "\n"
-		emailContent += "DB Name: " + status.Dbnm + "\n"
-		emailContent += "Details: " + status.Details + "\n"
-		emailContent += "Timestamp: " + localTimestamp.String()
-		log.Printf("emailContent: ", emailContent)
-		go utils.SendEmail("Database Monitoring Alert", emailContent)
-	}
-	err := db.InsertMessage(status.Status, status.Details, status.Ip, status.Dbtype, status.Dbnm, status.Timestamp.AsTime())
+func init() {
+	var err error
+	db, err = sql.Open("sqlite3", "./messages.db")
 	if err != nil {
-		log.Printf("Failed to insert message into the database: %v", err)
-		return &proto.DatabaseStatusResponse{
-			Message: "Failed to insert message into the database.",
-		}, err
+		log.Fatalf("Failed to open database: %v", err)
 	}
 
-	return &proto.DatabaseStatusResponse{
-		Message: "Message received and saved successfully.",
-	}, nil
+	// Create the table if it doesn't exist
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS messages (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		status TEXT,
+		details TEXT,
+		ip TEXT,
+		dbtype TEXT,
+		dbnm TEXT,
+		timestamp DATETIME
+	)
+	`)
+
+	if err != nil {
+		log.Fatalf("Failed to create table: %v", err)
+	}
 }
 
-func (c *ClientInfoServer) GetClientInfo(ctx context.Context, req *proto.ClientInfoRequest) (*proto.ClientInfoResponse, error) {
-	clients, err := db.GetClientInfos(req.DbType) // Adjusted function name
+// InsertMessage inserts a new message into the database.
+func InsertMessage(status, details, ip, dbtype, dbnm string, timestamp time.Time) error {
+	_, err := db.Exec(`
+	INSERT INTO messages (status, details, ip, dbtype, dbnm, timestamp) 
+	VALUES (?, ?, ?, ?, ?, ?)
+	`, status, details, ip, dbtype, dbnm, timestamp)
+	return err
+}
+
+// GetClientInfos retrieves all the active client configurations for a given DB type.
+func GetClientInfos(targetDbType string) ([]ClientConfig, error) {
+	rows, err := db.Query("SELECT ip, port, dbtype, dbname, dbuser, userpwd FROM client_info WHERE isenable=1 and dbtype = ?", targetDbType)
 	if err != nil {
-		log.Printf("Failed to retrieve client info from the database: %v", err)
 		return nil, err
 	}
+	defer rows.Close()
 
-	var clientInfos []*proto.ClientInfo
-	for _, client := range clients {
-		clientInfo := &proto.ClientInfo{
-			Ip:       client.IP,
-			Port:     int32(client.Port),
-			DbType:   client.DbType,
-			DbName:   client.DbName,
-			DbUser:   client.DbUser,
-			UserPwd:  client.UserPwd,
-			IsEnable: true,
+	var configs []ClientConfig
+	for rows.Next() {
+		var config ClientConfig
+		err := rows.Scan(&config.IP, &config.Port, &config.DbType, &config.DbName, &config.DbUser, &config.UserPwd)
+		if err != nil {
+			return nil, err
 		}
-		clientInfos = append(clientInfos, clientInfo)
+		configs = append(configs, config)
 	}
-
-	return &proto.ClientInfoResponse{ClientInfos: clientInfos}, nil
+	return configs, nil
 }
+
+type ClientConfig struct {
+	IP      string
+	Port    int
+	DbType  string
+	DbName  string
+	DbUser  string
+	UserPwd string
+}
+
 
 ```

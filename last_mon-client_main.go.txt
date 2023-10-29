@@ -1,19 +1,14 @@
-项目mon最新的`cmd/mon-client/main.go`文件如下, 请保存,后续更新以此为基础
+如下是项目gpmon当前的`mon-client/main.go`文件, 请保存,后续更新以此为基础
 ```
-// cmd/mon-client/main.go
-/*
-这里的代码首先通过getClientInfo函数从gRPC服务器获取客户端的数据库信息，然后使用这些信息来构建DSN。
-接下来，它检查数据库的状态，并将检查的结果发送到gRPC服务器
-*/
-
+// mon-client/main.go
 package main
 
 import (
 	"context"
 	"fmt"
+	"gpmon/db"
+	"gpmon/grpc/proto"
 	"log"
-	"mon/db"
-	"mon/grpc/proto"
 	"os"
 	"time"
 
@@ -21,22 +16,21 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// getClientInfo retrieves client's database configuration from the gRPC server using dbType.
-func getClientInfo(serverIP, dbTypeReq string) (ip string, port int32, dbType, dbName, dbUser, userPwd string, err error) {
+// getClientInfos retrieves all clients' database configurations from the gRPC server using dbType.
+func getClientInfos(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error) {
 	conn, err := grpc.Dial(fmt.Sprintf("%s:5051", serverIP), grpc.WithInsecure())
 	if err != nil {
-		return "", 0, "", "", "", "", err
+		return nil, err
 	}
 	defer conn.Close()
 
 	c := proto.NewClientInfoServiceClient(conn)
-	// response, err := c.GetClientInfo(context.Background(), &proto.ClientInfoRequest{DbType: dbTypeReq}) // Using DbType instead of IP
 	response, err := c.GetClientInfo(context.Background(), &proto.ClientInfoRequest{DbType: dbTypeReq})
 	if err != nil {
-		return "", 0, "", "", "", "", err
+		return nil, err
 	}
 
-	return response.Ip, response.Port, response.DbType, response.DbName, response.DbUser, response.UserPwd, nil
+	return response.ClientInfos, nil
 }
 
 func main() {
@@ -45,51 +39,54 @@ func main() {
 	}
 
 	serverIP := os.Args[1]
-
-	// Sample DbType to request. Adjust as needed.
-	dbTypeReq := "ORACLE"
+	dbTypeReq := "ORACLE" // Sample DbType to request. Adjust as needed.
 
 	// 1. Retrieve configurations from the gRPC server using dbType
-	ip, port, dbType, dbName, dbUser, userPwd, err := getClientInfo(serverIP, dbTypeReq)
+	clientInfos, err := getClientInfos(serverIP, dbTypeReq)
 	if err != nil {
-		log.Fatalf("Failed to retrieve configuration: %v", err)
+		log.Fatalf("Failed to retrieve configurations: %v", err)
 	}
 
-	DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`, dbUser, userPwd, ip, port, dbName)
+	for _, clientInfo := range clientInfos {
+		DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`,
+			clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
 
-	// 2. Perform Database Check
-	status, details, err := db.CheckDatabaseStatus(DSN)
-	if status == "" || err != nil {
-		log.Fatalf("Failed to get database status. Error: %v", err)
+		// 2. Perform Database Check
+		status, details, err := db.CheckDatabaseStatus(DSN)
+		if status == "" || err != nil {
+			log.Printf("Failed to get database status for IP %s. Error: %v", clientInfo.Ip, err)
+			continue
+		}
+
+		// 3. Prepare message to send
+		msg := &proto.DatabaseStatus{
+			Status:    status,
+			Details:   details,
+			Ip:        clientInfo.Ip,
+			Dbtype:    clientInfo.DbType,
+			Dbnm:      clientInfo.DbName,
+			Timestamp: timestamppb.Now(),
+		}
+
+		// Adjust the timestamp to consider local timezone
+		localNow := time.Now().In(time.Local)
+		msg.Timestamp = timestamppb.New(localNow)
+
+		// 4. Send the message to the gRPC server
+		conn, err := grpc.Dial(fmt.Sprintf("%s:5051", serverIP), grpc.WithInsecure())
+		if err != nil {
+			log.Fatalf("did not connect: %v", err)
+		}
+		defer conn.Close()
+		c := proto.NewDatabaseStatusServiceClient(conn)
+
+		response, err := c.SendStatus(context.Background(), msg)
+		if err != nil {
+			log.Printf("could not send status for IP %s: %v", clientInfo.Ip, err)
+			continue
+		}
+		log.Printf("Response from server for IP %s: %s", clientInfo.Ip, response.Message)
 	}
-
-	// 3. Prepare message to send
-	msg := &proto.DatabaseStatus{
-		Status:    status,
-		Details:   details,
-		Ip:        ip,
-		Dbtype:    dbType,
-		Dbnm:      dbName,
-		Timestamp: timestamppb.Now(),
-	}
-
-	// Adjust the timestamp to consider local timezone
-	localNow := time.Now().In(time.Local)
-	msg.Timestamp = timestamppb.New(localNow)
-
-	// 4. Send the message to the gRPC server
-	conn, err := grpc.Dial(fmt.Sprintf("%s:5051", serverIP), grpc.WithInsecure())
-	if err != nil {
-		log.Fatalf("did not connect: %v", err)
-	}
-	defer conn.Close()
-	c := proto.NewDatabaseStatusServiceClient(conn)
-
-	response, err := c.SendStatus(context.Background(), msg)
-	if err != nil {
-		log.Fatalf("could not send status: %v", err)
-	}
-	log.Printf("Response from server: %s", response.Message)
 }
 
 ```
