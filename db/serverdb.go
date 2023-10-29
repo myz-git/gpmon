@@ -85,8 +85,9 @@ func UpdateClientInfoOnError(ip string, dbName string, dbType string) error {
 func UpdateClientInfoOnSuccess(ip string, dbName string, dbType string) error {
 	_, err := db.Exec(`
         UPDATE client_info 
-        SET status = 'OK', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime')
+        SET status = 'OK', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime'),ismail=0,last_email_sent=''
         WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
+	//当数据库检查正常时,设置邮件为未发送
 	return err
 }
 
@@ -109,8 +110,8 @@ func ShouldSendEmail(ip string, dbType string, dbName string) bool {
 		// 处理错误，可能是因为记录不存在
 	}
 
-	// 设定邮件发送的冷却期为1小时
-	return time.Since(lastEmailSent) > time.Hour
+	// 设定邮件发送的冷却期为24小时
+	return time.Since(lastEmailSent) > 24*time.Hour
 }
 
 // 更新邮件发送时间的函数
