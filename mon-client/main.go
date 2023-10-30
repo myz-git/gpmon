@@ -31,52 +31,31 @@ func getClientInfos(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error) {
 	return response.ClientInfos, nil
 }
 
-func main() {
-	if len(os.Args) < 2 {
-		log.Fatalf("Usage: %s <server IP>", os.Args[0])
-	}
-
-	serverIP := os.Args[1]
-	dbTypeReq := "ORACLE" // Sample DbType to request. Adjust as needed.
-
-	// 1. Retrieve configurations from the gRPC server using dbType
+func performCheck(serverIP, dbTypeReq string, check db.CheckItem) {
 	clientInfos, err := getClientInfos(serverIP, dbTypeReq)
 	if err != nil {
-		log.Fatalf("Failed to retrieve configurations: %v", err)
+		log.Printf("Failed to retrieve configurations: %v", err)
+		return
 	}
 
 	for _, clientInfo := range clientInfos {
 		DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`,
 			clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
 
-		// 2. Perform Database Check
-		status, details, err := db.CheckDatabaseStatus(DSN)
+		// Execute the SQL check based on check.CheckSQL
+		// Perform Database Check
+		status, details, checkLvl, err := db.ExecuteCheck(DSN, check)
 		if err != nil {
-			log.Printf("Failed to get database status for IP %s. Error: %v", clientInfo.Ip, err)
-			// Update CLIENT_INFO with ERROR status
-			err = db.UpdateClientInfoOnError(clientInfo.Ip, clientInfo.DbName, clientInfo.DbType)
-			if err != nil {
-				log.Printf("Failed to update client info for IP %s with ERROR status. Error: %v", clientInfo.Ip, err)
+			log.Printf("Failed to perform check '%s' for IP %s. Error: %v", check.CheckName, clientInfo.Ip, err)
+			// 根据故障级别处理错误
+			if checkLvl == "ERROR" {
+				// 处理错误级别为 ERROR 的情况
+			} else if checkLvl == "WARNING" {
+				// 处理错误级别为 WARNING 的情况
 			}
 			continue
 		}
-
-		// Assume the database status check returns a status of "OK" or "ERROR"
-		if status == "OK" {
-			// Update CLIENT_INFO with OK status
-			err = db.UpdateClientInfoOnSuccess(clientInfo.Ip, clientInfo.DbName, clientInfo.DbType)
-			if err != nil {
-				log.Printf("Failed to update client info for IP %s with OK status. Error: %v", clientInfo.Ip, err)
-			}
-		} else {
-			// Update CLIENT_INFO with ERROR status
-			err = db.UpdateClientInfoOnError(clientInfo.Ip, clientInfo.DbName, clientInfo.DbType)
-			if err != nil {
-				log.Printf("Failed to update client info for IP %s with ERROR status. Error: %v", clientInfo.Ip, err)
-			}
-		}
-
-		// 3. Prepare message to send
+		// Prepare message to send
 		msg := &proto.DatabaseStatus{
 			Status:    status,
 			Details:   details,
@@ -90,19 +69,61 @@ func main() {
 		localNow := time.Now().In(time.Local)
 		msg.Timestamp = timestamppb.New(localNow)
 
-		// 4. Send the message to the gRPC server
+		// Send the message to the gRPC server
 		conn, err := grpc.Dial(fmt.Sprintf("%s:5051", serverIP), grpc.WithInsecure())
 		if err != nil {
-			log.Fatalf("did not connect: %v", err)
+			log.Printf("Failed to connect to server: %v", err)
+			continue
 		}
 		defer conn.Close()
 		c := proto.NewDatabaseStatusServiceClient(conn)
 
 		response, err := c.SendStatus(context.Background(), msg)
 		if err != nil {
-			log.Printf("could not send status for IP %s: %v", clientInfo.Ip, err)
+			log.Printf("Failed to send status for IP %s: %v", clientInfo.Ip, err)
 			continue
 		}
 		log.Printf("Response from server for IP %s: %s", clientInfo.Ip, response.Message)
+	}
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		log.Fatalf("Usage: %s <server IP>", os.Args[0])
+	}
+
+	serverIP := os.Args[1]
+	dbTypeReq := "ORACLE" // Sample DbType to request. Adjust as needed.
+
+	// Retrieve all enabled checks
+	checks, err := db.GetEnabledChecks()
+	if err != nil {
+		log.Fatalf("Failed to get enabled checks: %v", err)
+	}
+
+	// Setup tickers for each check based on its frequency
+	tickers := make(map[int]*time.Ticker)
+	for _, check := range checks {
+		tickers[check.ID] = time.NewTicker(time.Duration(check.Frequency) * time.Minute)
+		defer tickers[check.ID].Stop()
+	}
+
+	// Perform the initial check before starting the loop
+	for _, check := range checks {
+		performCheck(serverIP, dbTypeReq, check)
+	}
+
+	// Start an infinite loop for each check
+	for {
+		for _, check := range checks {
+			ticker := tickers[check.ID]
+			select {
+			case <-ticker.C:
+				performCheck(serverIP, dbTypeReq, check)
+			default:
+				// Non-blocking select to allow multiple tickers
+			}
+		}
+		time.Sleep(1 * time.Second) // Sleep to prevent a busy loop
 	}
 }
