@@ -40,13 +40,13 @@ func (s *Server) SendStatus(ctx context.Context, status *proto.DatabaseStatus) (
 		emailContent += "Check Time: " + localTimestamp.Local().Format(base_format)
 		// log.Printf(emailContent)
 		// Assuming the email sending function will return an error if unsuccessful
-		log.Printf("准备发送邮件 for %s: %s: %s ....", status.Ip, status.Dbnm, status.CheckNm)
+
 		if err := utils.SendEmail(status.Ip, status.Dbtype, status.Dbnm, "Database Monitoring Alert", emailContent); err != nil {
 			log.Println("邮件发送失败:", err)
 		} else {
 			//邮件发送成功 更新发送时间
-			db.UpdateLastEmailSent(status.Ip, status.Port, status.Dbtype, status.Dbnm, status.CheckNm)
-			log.Printf("邮件已发送!")
+			db.UpdateMailTm(status.Ip, status.Port, status.Dbtype, status.Dbnm, status.CheckNm)
+			log.Printf("已发送邮件: %s: %s: %s", status.Ip, status.Dbnm, status.CheckNm)
 		}
 	}
 

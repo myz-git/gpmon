@@ -26,7 +26,7 @@ func init() {
 	/*** 获取项目根路径 ***/
 	_, filename, _, _ := runtime.Caller(0)
 	wd := path.Dir(path.Dir(filename))
-	log.Printf("wd:  %s", wd)
+	// log.Printf("wd:  %s", wd)
 	/*** End ***/
 
 	/*** 设定dbfile路径 ***/
@@ -122,7 +122,7 @@ func GetClientInfos(targetDbType string) ([]ClientConfig, error) {
 func ShouldSendEmail(ip string, port int32, dbType string, dbName string, checkNm string) bool {
 	var lastEmailSent time.Time
 	err := db.QueryRow(`
-        SELECT last_email_sent FROM check_result 
+        SELECT mailtm FROM check_result 
 		where ip=? and port=? and dbtype=? and dbname=? and chk_nm=?`, ip, port, dbType, dbName, checkNm).Scan(&lastEmailSent)
 
 	if err == sql.ErrNoRows {
@@ -135,11 +135,11 @@ func ShouldSendEmail(ip string, port int32, dbType string, dbName string, checkN
 }
 
 // 更新邮件发送时间的函数
-func UpdateLastEmailSent(ip string, port int32, dbType string, dbName string, checkNm string) error {
+func UpdateMailTm(ip string, port int32, dbType string, dbName string, checkNm string) error {
 	// log.Printf("更新邮件发送时间: %s,%v,%s,%s,%s ", ip, port, dbType, dbName, checkNm)
 	_, err := db.Exec(`
         UPDATE check_result 
-        SET last_email_sent = datetime('now', 'localtime')
+        SET mailtm     = datetime('now', 'localtime')
         where ip=? and port=? and dbtype=? and dbname=? and chk_nm=?`, ip, port, dbType, dbName, checkNm)
 	// log.Printf("更新邮件发送ERR: %s", err)
 	return err

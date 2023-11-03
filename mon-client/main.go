@@ -89,7 +89,7 @@ func main() {
 	/*** 获取项目根路径 ***/
 	_, filename, _, _ := runtime.Caller(0)
 	wd := path.Dir(path.Dir(filename))
-	log.Printf("wd:  %s", wd)
+	// log.Printf("wd:  %s", wd)
 	/*** End ***/
 
 	/*** 设定log 同时输出到控制台及log文件中 ***/
