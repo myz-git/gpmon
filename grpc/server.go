@@ -20,20 +20,37 @@ type ClientInfoServer struct {
 
 func (s *Server) SendStatus(ctx context.Context, status *proto.DatabaseStatus) (*proto.DatabaseStatusResponse, error) {
 	// Adjust timestamp to consider local timezone
+	const base_format = "2006-01-02 15:04:05"
 	localTimestamp := status.Timestamp.AsTime().In(time.Local)
-	log.Printf("%s,%s,%s,%s,%s", status.Ip, status.Dbtype, status.Dbnm, status.Status, status.Details)
+	log.Printf("%s,%s,%s,%s,%s", status.Ip, status.Dbtype, status.Dbnm, status.CheckNm, status.CheckResult)
+	// Insert check result into check_results table
+	// err := db.InsertCheckResult(status.Ip, int(status.Port), status.Dbtype, status.Dbnm, status.CheckNm, status.CheckLvl, status.Details)
+	// if err != nil {
+	// 	log.Printf("Failed to insert check result into the database: %v", err)
+	// 	return nil, err
+	// }
 
-	if status.Status == "ERROR" {
-		emailContent := "Alert! Database Error detected.\n"
+	// If the status is ERROR, and it's time to send an email (not in cooldown period), send an email
+	if status.CheckResult != "OK" && db.ShouldSendEmail(status.Ip, status.Port, status.Dbtype, status.Dbnm, status.CheckNm) {
+		emailContent := "Alert! " + status.CheckNm + " " + status.CheckResult + " detected.\n"
 		emailContent += "IP Address: " + status.Ip + "\n"
 		emailContent += "DB Type: " + status.Dbtype + "\n"
 		emailContent += "DB Name: " + status.Dbnm + "\n"
 		emailContent += "Details: " + status.Details + "\n"
-		emailContent += "Timestamp: " + localTimestamp.String()
-		log.Printf("emailContent: ", emailContent)
-		go utils.SendEmail(status.Ip, status.Dbtype, status.Dbnm, "Database Monitoring Alert", emailContent)
+		emailContent += "Check Time: " + localTimestamp.Local().Format(base_format)
+		// log.Printf(emailContent)
+		// Assuming the email sending function will return an error if unsuccessful
+		log.Printf("准备发送邮件 for %s: %s: %s ....", status.Ip, status.Dbnm, status.CheckNm)
+		if err := utils.SendEmail(status.Ip, status.Dbtype, status.Dbnm, "Database Monitoring Alert", emailContent); err != nil {
+			log.Println("邮件发送失败:", err)
+		} else {
+			//邮件发送成功 更新发送时间
+			db.UpdateLastEmailSent(status.Ip, status.Port, status.Dbtype, status.Dbnm, status.CheckNm)
+			log.Printf("邮件已发送!")
+		}
 	}
-	err := db.InsertMessage(status.Status, status.Details, status.Ip, status.Dbtype, status.Dbnm)
+
+	err := db.InsertCheckhis(status.Ip, status.Port, status.Dbtype, status.Dbnm, status.CheckNm, status.CheckResult, status.Details)
 	if err != nil {
 		log.Printf("Failed to insert message into the database: %v", err)
 		return &proto.DatabaseStatusResponse{
@@ -41,30 +58,28 @@ func (s *Server) SendStatus(ctx context.Context, status *proto.DatabaseStatus) (
 		}, err
 	}
 
-	return &proto.DatabaseStatusResponse{
-		Message: "Message received and saved successfully.",
-	}, nil
+	return &proto.DatabaseStatusResponse{Message: "received and processed"}, nil
 }
 
+// GetClientInfo retrieves the client information from the database.
 func (c *ClientInfoServer) GetClientInfo(ctx context.Context, req *proto.ClientInfoRequest) (*proto.ClientInfoResponse, error) {
-	clients, err := db.GetClientInfos(req.DbType) // Adjusted function name
+	clients, err := db.GetClientInfos(req.DbType)
 	if err != nil {
 		log.Printf("Failed to retrieve client info from the database: %v", err)
 		return nil, err
 	}
 
-	var clientInfos []*proto.ClientInfo
+	clientInfos := make([]*proto.ClientInfo, 0, len(clients))
 	for _, client := range clients {
-		clientInfo := &proto.ClientInfo{
-			Ip:       client.IP,
-			Port:     int32(client.Port),
-			DbType:   client.DbType,
-			DbName:   client.DbName,
-			DbUser:   client.DbUser,
-			UserPwd:  client.UserPwd,
-			IsEnable: true,
-		}
-		clientInfos = append(clientInfos, clientInfo)
+		clientInfos = append(clientInfos, &proto.ClientInfo{
+			Ip:      client.IP,
+			Port:    client.Port,
+			DbType:  client.DbType,
+			DbName:  client.DbName,
+			DbUser:  client.DbUser,
+			UserPwd: client.UserPwd,
+			// IsEnable: client.IsEnable == 1,
+		})
 	}
 
 	return &proto.ClientInfoResponse{ClientInfos: clientInfos}, nil

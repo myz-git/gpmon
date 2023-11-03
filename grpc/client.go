@@ -23,7 +23,7 @@ func SetupClient(serverAddr string) (pb.DatabaseStatusServiceClient, *grpc.Clien
 // SendStatus 发送数据库状态到服务器
 func SendStatus(client pb.DatabaseStatusServiceClient, status, details string) (*pb.DatabaseStatusResponse, error) {
 	return client.SendStatus(context.Background(), &pb.DatabaseStatus{
-		Status:  status,
-		Details: details,
+		CheckResult: status,
+		Details:     details,
 	})
 }

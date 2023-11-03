@@ -7,10 +7,6 @@ import (
 	_ "github.com/godror/godror"
 )
 
-// db/oradb.go
-
-// ... [其他引入的包]
-
 type CheckItem struct {
 	ID        int
 	CheckName string
@@ -39,55 +35,89 @@ func GetEnabledChecks() ([]CheckItem, error) {
 	return checks, nil
 }
 
-// PerformChecks executes the SQL checks against the database.
-func PerformChecks(DSN string, checks []CheckItem) ([]CheckResult, error) {
-	var results []CheckResult
-	for _, check := range checks {
-		status, details, checklvl, err := ExecuteCheck(DSN, check)
-		results = append(results, CheckResult{
-			ID:        check.ID,
-			CheckName: check.CheckName,
-			Status:    status,
-			Details:   details,
-			CheckLvl:  checklvl,
-			Err:       err,
-		})
-	}
-	return results, nil
-}
+// PerformChecks 根据dbmonsql表中的检查项执行数据库健康检查
+// func PerformChecks(DSN string, checks []CheckItem) ([]CheckResult, error) {
+// 	var results []CheckResult
+// 	db, err := sql.Open("godror", DSN)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("cannot open database: %v", err)
+// 	}
+// 	defer db.Close()
+
+// 	for _, check := range checks {
+// 		result, err := executeSQLCheck(db, check.CheckSQL)
+// 		results = append(results, CheckResult{
+// 			ID:        check.ID,
+// 			CheckName: check.CheckName,
+// 			CheckSQL:  check.CheckSQL,
+// 			CheckLvl:  check.CheckLvl,
+// 			Status:    result,
+// 			Error:     err,
+// 		})
+// 	}
+// 	return results, nil
+// }
 
 // executeCheck executes a single SQL check against the database and returns the status.
-func ExecuteCheck(DSN string, check CheckItem) (status string, details string, checkLvl string, err error) {
+// func ExecuteChecks(db *sql.DB, checks []CheckItem) ([]CheckResult, error) {
+// 	var results []CheckResult
+// 	for _, check := range checks {
+// 		result, err := executeSQLCheck(db, check.CheckSQL)
+// 		results = append(results, CheckResult{
+// 			ID:        check.ID,
+// 			CheckName: check.CheckName,
+// 			CheckSQL:  check.CheckSQL,
+// 			CheckLvl:  check.CheckLvl,
+// 			Status:    result,
+// 			Error:     err,
+// 		})
+// 	}
+// 	return results, nil
+// }
+
+// executeSQLCheck 执行单个SQL检查并返回结果
+// func executeSQLCheck(db *sql.DB, sqlQuery string) (string, error) {
+// 	var result string
+// 	err := db.QueryRow(sqlQuery).Scan(&result)
+// 	if err != nil {
+// 		if err == sql.ErrNoRows {
+// 			return "WARNING", fmt.Errorf("no rows returned for sql: %s", sqlQuery)
+// 		}
+// 		return "ERROR", fmt.Errorf("error executing sql: %s, error: %v", sqlQuery, err)
+// 	}
+// 	return "OK", nil
+// }
+
+// ExecuteCheck executes a single SQL check against the database and returns the result along with the check level.
+func ExecuteCheck(DSN string, check CheckItem) (status string, details string, err error) {
 	db, err := sql.Open("godror", DSN)
 	if err != nil {
-		return "ERROR", "Cannot connect to database", check.CheckLvl, err
+		return "ERROR", "Cannot connect to database", err
 	}
 	defer db.Close()
 
-	// 假设我们的检查都是通过查询单个值来确认状态的
-	// 您可能需要根据实际的SQL检查来调整这里的逻辑
 	var result int
 	err = db.QueryRow(check.CheckSQL).Scan(&result)
+	// log.Printf("ExecuteCheck db.QueryRow checksql:===%s ,result:===%v", check.CheckSQL, result)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// 检查失败，没有记录，返回checklvl
-			return "ERROR", "No records found", check.CheckLvl, nil
-		} else {
-			// SQL执行错误
-			return "ERROR", err.Error(), check.CheckLvl, err
+			// No result means the check failed, return the level of the check.
+			return check.CheckLvl, "No rows returned", nil
 		}
+		// log.Printf("ExecuteCheck db.QueryRow err:===%s", err)
+		// log.Printf("ExecuteCheck db.QueryRow err.Error:===%s", err.Error())
+		return "ERROR", err.Error(), err
+		//这里err和err.Error() 内容一样
 	}
-
-	// 检查成功
-	return "OK", "Check successful", "OK", nil
+	return "OK", "Check successful", nil
 }
 
-// CheckResult represents the result of a single database check.
+// / CheckResult 表示数据库检查的结果
 type CheckResult struct {
 	ID        int
 	CheckName string
-	Status    string
-	Details   string
+	CheckSQL  string
 	CheckLvl  string
-	Err       error
+	Status    string
+	Error     error
 }

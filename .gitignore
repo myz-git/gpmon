@@ -1,5 +1,7 @@
 local/
+log/
 *.txt
 *.db
+*.log
 go.mod
 go.sum

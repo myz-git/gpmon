@@ -14,12 +14,14 @@ service ClientInfoService {
 }
 
 message DatabaseStatus {
-    string status = 1;
-    string details = 2;
-    string ip = 3;
-    string dbtype = 4;
-    string dbnm = 5;
-    google.protobuf.Timestamp timestamp = 6;
+    string ip = 1;
+    int32 port = 2; // 确保与ClientInfo中的port类型匹配
+    string dbtype = 3;
+    string dbnm = 4;
+    string checkNm = 5;  // 检查名称
+    string checkResult = 6; // 检查结果
+    string details = 7;
+    google.protobuf.Timestamp timestamp = 8;
 }
 
 message DatabaseStatusResponse {
@@ -27,7 +29,7 @@ message DatabaseStatusResponse {
 }
 
 message ClientInfoRequest {
-    string DbType = 1; // Use dbtype as the request parameter
+    string DbType = 1; // 使用dbtype作为请求参数
 }
 
 message ClientInfoResponse {
@@ -43,3 +45,4 @@ message ClientInfo {
     string UserPwd = 6;
     bool IsEnable = 7;
 }
+

@@ -6,15 +6,17 @@ import (
 	"fmt"
 	"gpmon/db"
 	"gpmon/grpc/proto"
+	"io"
 	"log"
 	"os"
+	"path"
+	"runtime"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// getClientInfos retrieves all clients' database configurations from the gRPC server using dbType.
 func getClientInfos(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error) {
 	conn, err := grpc.Dial(fmt.Sprintf("%s:5051", serverIP), grpc.WithInsecure())
 	if err != nil {
@@ -31,63 +33,76 @@ func getClientInfos(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error) {
 	return response.ClientInfos, nil
 }
 
-func performCheck(serverIP, dbTypeReq string, check db.CheckItem) {
-	clientInfos, err := getClientInfos(serverIP, dbTypeReq)
+func performCheck(serverIP string, clientInfo *proto.ClientInfo, check db.CheckItem) {
+
+	DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`,
+		clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
+
+	// Execute the SQL check based on check.CheckSQL
+	status, details, _ := db.ExecuteCheck(DSN, check)
+
+	err := db.InsertCheckResult(clientInfo.Ip, clientInfo.Port, clientInfo.DbType, clientInfo.DbName, check.CheckName, status, details)
 	if err != nil {
-		log.Printf("Failed to retrieve configurations: %v", err)
-		return
+		log.Printf("Failed check '%s' for IP %s", check.CheckName, clientInfo.Ip)
 	}
 
-	for _, clientInfo := range clientInfos {
-		DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`,
-			clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
-
-		// Execute the SQL check based on check.CheckSQL
-		// Perform Database Check
-		status, details, checkLvl, err := db.ExecuteCheck(DSN, check)
-		if err != nil {
-			log.Printf("Failed to perform check '%s' for IP %s. Error: %v", check.CheckName, clientInfo.Ip, err)
-			// 根据故障级别处理错误
-			if checkLvl == "ERROR" {
-				// 处理错误级别为 ERROR 的情况
-			} else if checkLvl == "WARNING" {
-				// 处理错误级别为 WARNING 的情况
-			}
-			continue
-		}
-		// Prepare message to send
-		msg := &proto.DatabaseStatus{
-			Status:    status,
-			Details:   details,
-			Ip:        clientInfo.Ip,
-			Dbtype:    clientInfo.DbType,
-			Dbnm:      clientInfo.DbName,
-			Timestamp: timestamppb.Now(),
-		}
-
-		// Adjust the timestamp to consider local timezone
-		localNow := time.Now().In(time.Local)
-		msg.Timestamp = timestamppb.New(localNow)
-
-		// Send the message to the gRPC server
-		conn, err := grpc.Dial(fmt.Sprintf("%s:5051", serverIP), grpc.WithInsecure())
-		if err != nil {
-			log.Printf("Failed to connect to server: %v", err)
-			continue
-		}
-		defer conn.Close()
-		c := proto.NewDatabaseStatusServiceClient(conn)
-
-		response, err := c.SendStatus(context.Background(), msg)
-		if err != nil {
-			log.Printf("Failed to send status for IP %s: %v", clientInfo.Ip, err)
-			continue
-		}
-		log.Printf("Response from server for IP %s: %s", clientInfo.Ip, response.Message)
+	// Prepare message to send
+	msg := &proto.DatabaseStatus{
+		Ip:          clientInfo.Ip,
+		Port:        clientInfo.Port,
+		Dbtype:      clientInfo.DbType,
+		Dbnm:        clientInfo.DbName,
+		CheckNm:     check.CheckName,
+		CheckResult: status,
+		Details:     details,
+		Timestamp:   timestamppb.Now(),
 	}
+
+	// Adjust the timestamp to consider local timezone
+	localNow := time.Now().In(time.Local)
+	msg.Timestamp = timestamppb.New(localNow)
+
+	// Send the message to the gRPC server
+	conn, err := grpc.Dial(fmt.Sprintf("%s:5051", serverIP), grpc.WithInsecure())
+	if err != nil {
+		log.Printf("Failed to connect to server: %v", err)
+
+	}
+	defer conn.Close()
+	c := proto.NewDatabaseStatusServiceClient(conn)
+
+	response, err := c.SendStatus(context.Background(), msg)
+	if err != nil {
+		log.Printf("Failed to send status for IP %s: %v", clientInfo.Ip, err)
+
+	}
+
+	// Insert check result into check_results table with OK status
+	// err = db.InsertCheckResult(clientInfo.Ip, int(clientInfo.Port), clientInfo.DbType, clientInfo.DbName, check.CheckName, status, details)
+	// if err != nil {
+	// 	log.Printf("Failed to insert check result for IP %s: %v", clientInfo.Ip, err)
+	// }
+	log.Printf("Response from server for IP %s: %s: %s", clientInfo.Ip, check.CheckName, response.Message)
 }
 
 func main() {
+	/*** 获取项目根路径 ***/
+	_, filename, _, _ := runtime.Caller(0)
+	wd := path.Dir(path.Dir(filename))
+	log.Printf("wd:  %s", wd)
+	/*** End ***/
+
+	/*** 设定log 同时输出到控制台及log文件中 ***/
+	f := wd + "/log/" + "oramon.log"
+	logFile, err := os.OpenFile(f, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0766)
+	if err != nil {
+		panic(err)
+	}
+	defer logFile.Close()
+	mw := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(mw)
+	/*** End ***/
+
 	if len(os.Args) < 2 {
 		log.Fatalf("Usage: %s <server IP>", os.Args[0])
 	}
@@ -109,8 +124,15 @@ func main() {
 	}
 
 	// Perform the initial check before starting the loop
-	for _, check := range checks {
-		performCheck(serverIP, dbTypeReq, check)
+	clientInfos, err := getClientInfos(serverIP, dbTypeReq)
+	if err != nil {
+		log.Fatalf("Failed to retrieve configurations: %v", err)
+	}
+	for _, clientInfo := range clientInfos {
+		for _, check := range checks {
+			// log.Printf("client_main-> init-> performCheck,%s", clientInfo.Ip)
+			performCheck(serverIP, clientInfo, check)
+		}
 	}
 
 	// Start an infinite loop for each check
@@ -119,7 +141,10 @@ func main() {
 			ticker := tickers[check.ID]
 			select {
 			case <-ticker.C:
-				performCheck(serverIP, dbTypeReq, check)
+				for _, clientInfo := range clientInfos {
+					// log.Printf("client_main-> for-> performCheck,%s", clientInfo.Ip)
+					performCheck(serverIP, clientInfo, check)
+				}
 			default:
 				// Non-blocking select to allow multiple tickers
 			}

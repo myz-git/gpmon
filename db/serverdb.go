@@ -4,6 +4,8 @@ package db
 import (
 	"database/sql"
 	"log"
+	"path"
+	"runtime"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -11,24 +13,45 @@ import (
 
 var db *sql.DB
 
+type ClientConfig struct {
+	IP      string
+	Port    int32
+	DbType  string
+	DbName  string
+	DbUser  string
+	UserPwd string
+}
+
 func init() {
+	/*** 获取项目根路径 ***/
+	_, filename, _, _ := runtime.Caller(0)
+	wd := path.Dir(path.Dir(filename))
+	log.Printf("wd:  %s", wd)
+	/*** End ***/
+
+	/*** 设定dbfile路径 ***/
+	dbf := wd + "/messages.db"
+
 	var err error
-	db, err = sql.Open("sqlite3", "D:\\Workspace\\gpmon\\messages.db")
+	db, err = sql.Open("sqlite3", dbf)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
+	/*** End ***/
 
 	// Create the table if it doesn't exist
 	_, err = db.Exec(`
-	CREATE TABLE IF NOT EXISTS messages (
+	CREATE TABLE IF NOT EXISTS check_his (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		status varchar(10),
-		details TEXT,
-		ip varchar(20),
-		dbtype varchar(10),
-		dbnm varchar(20),
-		timestamp  DATETIME DEFAULT (datetime('now','localtime'))
-	  )
+		ip VARCHAR(20),
+		port INT,
+		dbtype VARCHAR(10),
+		dbname VARCHAR(20),
+		chk_nm VARCHAR(30),
+		chk_result varchar(10),
+		chk_details text,
+		chk_time DATETIME DEFAULT (datetime('now', 'localtime'))
+	)
 	`)
 
 	if err != nil {
@@ -36,12 +59,17 @@ func init() {
 	}
 }
 
-// InsertMessage inserts a new message into the database.
-func InsertMessage(status, details, ip, dbtype, dbnm string) error {
-	_, err := db.Exec(`
-	INSERT INTO messages (status, details, ip, dbtype, dbnm) 
-	VALUES (?, ?, ?, ?, ?)
-	`, status, details, ip, dbtype, dbnm)
+// InsertCheckResult inserts a new check result into the check_results table.
+func InsertCheckResult(ip string, port int32, dbtype, dbname, checkname, checkResult, checkdatails string) error {
+	statement := `
+	INSERT INTO check_result (ip, port, dbtype, dbname, chk_nm, chk_result, chk_details)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(ip, port, dbtype, dbname, chk_nm) DO UPDATE SET
+	chk_result=excluded.chk_result,
+	chk_details=excluded.chk_details,
+	chk_time=datetime('now', 'localtime');`
+
+	_, err := db.Exec(statement, ip, port, dbtype, dbname, checkname, checkResult, checkdatails)
 	return err
 }
 
@@ -65,49 +93,41 @@ func GetClientInfos(targetDbType string) ([]ClientConfig, error) {
 	return configs, nil
 }
 
-type ClientConfig struct {
-	IP      string
-	Port    int
-	DbType  string
-	DbName  string
-	DbUser  string
-	UserPwd string
-}
+// func UpdateClientInfoOnError(ip string, dbName string, dbType string) error {
+// 	_, err := db.Exec(`
+//         UPDATE client_info
+//         SET status = 'ERROR', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime')
+//         WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
+// 	return err
+// }
 
-func UpdateClientInfoOnError(ip string, dbName string, dbType string) error {
-	_, err := db.Exec(`
-        UPDATE client_info 
-        SET status = 'ERROR', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime')
-        WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
-	return err
-}
-
-func UpdateClientInfoOnSuccess(ip string, dbName string, dbType string) error {
-	_, err := db.Exec(`
-        UPDATE client_info 
-        SET status = 'OK', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime'),ismail=0,last_email_sent=''
-        WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
-	//当数据库检查正常时,设置邮件为未发送
-	return err
-}
+// func UpdateClientInfoOnSuccess(ip string, dbName string, dbType string) error {
+// 	_, err := db.Exec(`
+//         UPDATE client_info
+//         SET status = 'OK', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime'),ismail=0,last_email_sent=''
+//         WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
+// 	//当数据库检查正常时,设置邮件为未发送
+// 	return err
+// }
 
 // UpdateClientInfoIsMail updates the 'ismail' field in the 'client_info' table.
-func UpdateClientInfoIsMail(ip string, dbType string, dbName string, isMail int) error {
-	_, err := db.Exec(`
-		UPDATE client_info 
-		SET ismail = ?
-		WHERE ip = ? AND dbname = ? AND dbtype = ?`, isMail, ip, dbName, dbType)
-	return err
-}
+// func UpdateIsMail(ip string, dbType string, dbName string, isMail int) error {
+// 	_, err := db.Exec(`
+// 		UPDATE check_result
+// 		SET ismail = ?
+// 		WHERE ip = ? AND dbname = ? AND dbtype = ?`, isMail, ip, dbName, dbType)
+// 	return err
+// }
 
-func ShouldSendEmail(ip string, dbType string, dbName string) bool {
+func ShouldSendEmail(ip string, port int32, dbType string, dbName string, checkNm string) bool {
 	var lastEmailSent time.Time
 	err := db.QueryRow(`
-        SELECT last_email_sent FROM client_info 
-        WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType).Scan(&lastEmailSent)
+        SELECT last_email_sent FROM check_result 
+		where ip=? and port=? and dbtype=? and dbname=? and chk_nm=?`, ip, port, dbType, dbName, checkNm).Scan(&lastEmailSent)
 
-	if err != nil {
-		// 处理错误，可能是因为记录不存在
+	if err == sql.ErrNoRows {
+		//当没有记录,即邮件发送时间为空,则返回TRUE,可以发送
+		return true
 	}
 
 	// 设定邮件发送的冷却期为24小时
@@ -115,10 +135,21 @@ func ShouldSendEmail(ip string, dbType string, dbName string) bool {
 }
 
 // 更新邮件发送时间的函数
-func UpdateLastEmailSent(ip string, dbType string, dbName string) error {
+func UpdateLastEmailSent(ip string, port int32, dbType string, dbName string, checkNm string) error {
+	// log.Printf("更新邮件发送时间: %s,%v,%s,%s,%s ", ip, port, dbType, dbName, checkNm)
 	_, err := db.Exec(`
-        UPDATE client_info 
-        SET last_email_sent = datetime(CURRENT_TIMESTAMP, 'localtime')
-        WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
+        UPDATE check_result 
+        SET last_email_sent = datetime('now', 'localtime')
+        where ip=? and port=? and dbtype=? and dbname=? and chk_nm=?`, ip, port, dbType, dbName, checkNm)
+	// log.Printf("更新邮件发送ERR: %s", err)
+	return err
+}
+
+// InsertMessage inserts a new message into the database.
+func InsertCheckhis(ip string, port int32, dbtype string, dbnm string, checkname string, checkresult string, details string) error {
+	_, err := db.Exec(`
+	INSERT INTO check_his (ip,port, dbtype, dbname, chk_nm,chk_result,chk_details)
+	VALUES (?, ?, ?, ?, ?,?, ?)
+	`, ip, port, dbtype, dbnm, checkname, checkresult, details)
 	return err
 }
