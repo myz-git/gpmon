@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/godror/godror v0.40.3
+	github.com/ibmdb/go_ibm_db v0.4.4
 	github.com/mattn/go-sqlite3 v1.14.17
 	google.golang.org/grpc v1.59.0
 	google.golang.org/protobuf v1.31.0

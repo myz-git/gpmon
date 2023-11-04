@@ -1,4 +1,4 @@
-// mon-server/main.go
+// gpmon/mon-server/main.go
 
 package main
 
@@ -23,7 +23,7 @@ func main() {
 	/*** End ***/
 
 	/*** 设定log 同时输出到控制台及log文件中 ***/
-	f := wd + "/log/" + "server.log"
+	f := wd + "/log/" + "gpmon.log"
 	logFile, err := os.OpenFile(f, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0766)
 	if err != nil {
 		panic(err)

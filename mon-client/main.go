@@ -93,7 +93,7 @@ func main() {
 	/*** End ***/
 
 	/*** 设定log 同时输出到控制台及log文件中 ***/
-	f := wd + "/log/" + "oramon.log"
+	f := wd + "/log/" + "orasvc.log"
 	logFile, err := os.OpenFile(f, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0766)
 	if err != nil {
 		panic(err)

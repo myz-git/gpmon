@@ -1,4 +1,4 @@
-// db/serverdb.go
+// gpmon/db/serverdb.go
 package db
 
 import (
