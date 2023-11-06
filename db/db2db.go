@@ -45,15 +45,20 @@ func ExecuteCheckDB2(DSN string, check DB2CheckItem) (status string, details str
 	}
 	defer db.Close()
 
-	var result int
+	// Assuming the result is a string that holds the status of the HADR delay
+	var result string
 	err = db.QueryRow(check.CheckSQL).Scan(&result)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			// If no rows are returned, we consider it as a failed check
 			return check.CheckLvl, "No rows returned", nil
 		}
+		// If there's an error executing the SQL, we return it as an ERROR status
 		return "ERROR", err.Error(), err
 	}
-	return "OK", "Check successful", nil
+
+	// If the query was successful, return the result which should be either 'OK' or 'WARNING'
+	return result, "Check successful", nil
 }
 
 // DB2CheckResult represents the result of a database check specifically for DB2.
