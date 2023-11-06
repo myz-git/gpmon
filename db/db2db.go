@@ -1,24 +1,26 @@
-// gpmon/db/oradb.go
+// gpmon/db/db2db.go
 package db
 
 import (
 	"database/sql"
 
-	_ "github.com/godror/godror"
+	_ "github.com/ibmdb/go_ibm_db" // DB2 driver
 )
 
-type CheckItem struct {
+// DB2CheckItem represents a check item specifically for DB2.
+type DB2CheckItem struct {
 	ID        int
 	CheckName string
 	CheckSQL  string
-	CheckLvl  string // 添加检查级别字段
+	CheckLvl  string // Check level field
 	Frequency int
 	IsEnable  int
 }
 
-// GetEnabledChecks retrieves all enabled checks from the dbmonsql table.
-func GetEnabledChecks(dbType string) ([]CheckItem, error) {
-	var checks []CheckItem
+// GetEnabledChecksDB2 retrieves all enabled checks from the DB2-specific table.
+func GetEnabledChecksDB2(dbType string) ([]DB2CheckItem, error) {
+	var checks []DB2CheckItem
+	// Adjust SQL syntax if necessary for DB2
 	rows, err := db.Query("SELECT id, checknm, checksql, checklvl, freq, isenable FROM dbmonsql WHERE  dbtype=? and isenable = 1", dbType)
 	if err != nil {
 		return nil, err
@@ -26,7 +28,7 @@ func GetEnabledChecks(dbType string) ([]CheckItem, error) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var check CheckItem
+		var check DB2CheckItem
 		if err := rows.Scan(&check.ID, &check.CheckName, &check.CheckSQL, &check.CheckLvl, &check.Frequency, &check.IsEnable); err != nil {
 			return nil, err
 		}
@@ -35,9 +37,9 @@ func GetEnabledChecks(dbType string) ([]CheckItem, error) {
 	return checks, nil
 }
 
-// ExecuteCheck executes a single SQL check against the database and returns the result along with the check level.
-func ExecuteCheck(DSN string, check CheckItem) (status string, details string, err error) {
-	db, err := sql.Open("godror", DSN)
+// ExecuteCheckDB2 executes a single SQL check against the DB2 database and returns the result along with the check level.
+func ExecuteCheckDB2(DSN string, check DB2CheckItem) (status string, details string, err error) {
+	db, err := sql.Open("go_ibm_db", DSN)
 	if err != nil {
 		return "ERROR", "Cannot connect to database", err
 	}
@@ -45,22 +47,17 @@ func ExecuteCheck(DSN string, check CheckItem) (status string, details string, e
 
 	var result int
 	err = db.QueryRow(check.CheckSQL).Scan(&result)
-	// log.Printf("ExecuteCheck db.QueryRow checksql:===%s ,result:===%v", check.CheckSQL, result)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// No result means the check failed, return the level of the check.
 			return check.CheckLvl, "No rows returned", nil
 		}
-		// log.Printf("ExecuteCheck db.QueryRow err:===%s", err)
-		// log.Printf("ExecuteCheck db.QueryRow err.Error:===%s", err.Error())
 		return "ERROR", err.Error(), err
-		//这里err和err.Error() 内容一样
 	}
 	return "OK", "Check successful", nil
 }
 
-// / CheckResult 表示数据库检查的结果
-type CheckResult struct {
+// DB2CheckResult represents the result of a database check specifically for DB2.
+type DB2CheckResult struct {
 	ID        int
 	CheckName string
 	CheckSQL  string

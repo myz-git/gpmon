@@ -1,4 +1,4 @@
-// gpmon/mon-client/main.go
+// gpmon/mon-client-db2/startdb2.go
 package main
 
 import (
@@ -13,11 +13,13 @@ import (
 	"runtime"
 	"time"
 
+	_ "github.com/ibmdb/go_ibm_db"
+
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func getClientInfos(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error) {
+func getClientInfos_db2(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error) {
 	conn, err := grpc.Dial(fmt.Sprintf("%s:5051", serverIP), grpc.WithInsecure())
 	if err != nil {
 		return nil, err
@@ -33,13 +35,15 @@ func getClientInfos(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error) {
 	return response.ClientInfos, nil
 }
 
-func performCheck(serverIP string, clientInfo *proto.ClientInfo, check db.CheckItem) {
+func performCheck_db2(serverIP string, clientInfo *proto.ClientInfo, check db.DB2CheckItem) {
 
-	DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`,
-		clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
+	// DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`,
+	// 	clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
+	DSN := fmt.Sprintf("HOSTNAME=%s;PORT=%d;DATABASE=%s;UID=%s;PWD=%s;",
+		clientInfo.Ip, clientInfo.Port, clientInfo.DbName, clientInfo.DbUser, clientInfo.UserPwd)
 
 	// Execute the SQL check based on check.CheckSQL
-	status, details, _ := db.ExecuteCheck(DSN, check)
+	status, details, _ := db.ExecuteCheckDB2(DSN, check)
 
 	err := db.InsertCheckResult(clientInfo.Ip, clientInfo.Port, clientInfo.DbType, clientInfo.DbName, check.CheckName, status, details)
 	if err != nil {
@@ -93,7 +97,7 @@ func main() {
 	/*** End ***/
 
 	/*** 设定log 同时输出到控制台及log文件中 ***/
-	f := wd + "/log/" + "orasvc.log"
+	f := wd + "/log/" + "db2svc.log"
 	logFile, err := os.OpenFile(f, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0766)
 	if err != nil {
 		panic(err)
@@ -108,10 +112,10 @@ func main() {
 	}
 
 	serverIP := os.Args[1]
-	dbTypeReq := "ORACLE" // Sample DbType to request. Adjust as needed.
+	dbTypeReq := "DB2" // Sample DbType to request. Adjust as needed.
 
 	// Retrieve all enabled checks
-	checks, err := db.GetEnabledChecks(dbTypeReq)
+	checks, err := db.GetEnabledChecksDB2(dbTypeReq)
 	if err != nil {
 		log.Fatalf("Failed to get enabled checks: %v", err)
 	}
@@ -124,14 +128,14 @@ func main() {
 	}
 
 	// Perform the initial check before starting the loop
-	clientInfos, err := getClientInfos(serverIP, dbTypeReq)
+	clientInfos, err := getClientInfos_db2(serverIP, dbTypeReq)
 	if err != nil {
 		log.Fatalf("Failed to retrieve configurations: %v", err)
 	}
 	for _, clientInfo := range clientInfos {
 		for _, check := range checks {
 			// log.Printf("client_main-> init-> performCheck,%s", clientInfo.Ip)
-			performCheck(serverIP, clientInfo, check)
+			performCheck_db2(serverIP, clientInfo, check)
 		}
 	}
 
@@ -143,7 +147,7 @@ func main() {
 			case <-ticker.C:
 				for _, clientInfo := range clientInfos {
 					// log.Printf("client_main-> for-> performCheck,%s", clientInfo.Ip)
-					performCheck(serverIP, clientInfo, check)
+					performCheck_db2(serverIP, clientInfo, check)
 				}
 			default:
 				// Non-blocking select to allow multiple tickers
