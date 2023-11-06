@@ -3,6 +3,7 @@ module gpmon
 go 1.20
 
 require (
+	github.com/go-sql-driver/mysql v1.7.1
 	github.com/godror/godror v0.40.3
 	github.com/ibmdb/go_ibm_db v0.4.4
 	github.com/mattn/go-sqlite3 v1.14.17

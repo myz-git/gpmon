@@ -7,7 +7,7 @@ import (
 	_ "github.com/ibmdb/go_ibm_db"
 )
 
-func main() {
+func main1() {
 	connStr := "HOSTNAME=1.1.1.97;DATABASE=myzdb;PORT=60006;UID=db2inst1;PWD=db2inst1"
 	db, err := sql.Open("go_ibm_db", connStr)
 	if err != nil {
