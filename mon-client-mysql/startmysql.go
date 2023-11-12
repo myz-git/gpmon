@@ -39,7 +39,7 @@ func performMySQLCheck(serverIP string, clientInfo *proto.ClientInfo, check db.M
 		clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
 
 	// Execute the SQL check based on check.CheckSQL
-	log.Printf("check:==>%v", check.CheckName)
+	// log.Printf("check:==>%v", check.CheckName)
 
 	status, details, err := db.ExecuteCheckMYSQL(DSN, check)
 

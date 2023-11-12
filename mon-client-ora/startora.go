@@ -1,4 +1,4 @@
-// gpmon/mon-client/main.go
+// gpmon/mon-client-ora/startora.go
 package main
 
 import (
@@ -77,11 +77,6 @@ func performCheck(serverIP string, clientInfo *proto.ClientInfo, check db.CheckI
 
 	}
 
-	// Insert check result into check_results table with OK status
-	// err = db.InsertCheckResult(clientInfo.Ip, int(clientInfo.Port), clientInfo.DbType, clientInfo.DbName, check.CheckName, status, details)
-	// if err != nil {
-	// 	log.Printf("Failed to insert check result for IP %s: %v", clientInfo.Ip, err)
-	// }
 	log.Printf("Response from server for IP %s: %s: %s", clientInfo.Ip, check.CheckName, response.Message)
 }
 
@@ -123,7 +118,7 @@ func main() {
 		defer tickers[check.ID].Stop()
 	}
 
-	// Perform the initial check before starting the loop
+	// 任务启动时,初始化对所有CHECK执行一项
 	clientInfos, err := getClientInfos(serverIP, dbTypeReq)
 	if err != nil {
 		log.Fatalf("Failed to retrieve configurations: %v", err)
@@ -135,8 +130,8 @@ func main() {
 		}
 	}
 
-	// Start an infinite loop for each check
-	for {
+	// 开始定时任务循环,执行频率根据check.freq
+	for { //无限循环
 		for _, check := range checks {
 			ticker := tickers[check.ID]
 			select {

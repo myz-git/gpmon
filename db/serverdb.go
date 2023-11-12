@@ -93,32 +93,6 @@ func GetClientInfos(targetDbType string) ([]ClientConfig, error) {
 	return configs, nil
 }
 
-// func UpdateClientInfoOnError(ip string, dbName string, dbType string) error {
-// 	_, err := db.Exec(`
-//         UPDATE client_info
-//         SET status = 'ERROR', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime')
-//         WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
-// 	return err
-// }
-
-// func UpdateClientInfoOnSuccess(ip string, dbName string, dbType string) error {
-// 	_, err := db.Exec(`
-//         UPDATE client_info
-//         SET status = 'OK', updatetm = datetime(CURRENT_TIMESTAMP, 'localtime'),ismail=0,last_email_sent=''
-//         WHERE ip = ? AND dbname = ? AND dbtype = ?`, ip, dbName, dbType)
-// 	//当数据库检查正常时,设置邮件为未发送
-// 	return err
-// }
-
-// UpdateClientInfoIsMail updates the 'ismail' field in the 'client_info' table.
-// func UpdateIsMail(ip string, dbType string, dbName string, isMail int) error {
-// 	_, err := db.Exec(`
-// 		UPDATE check_result
-// 		SET ismail = ?
-// 		WHERE ip = ? AND dbname = ? AND dbtype = ?`, isMail, ip, dbName, dbType)
-// 	return err
-// }
-
 func ShouldSendEmail(ip string, port int32, dbType string, dbName string, checkNm string) bool {
 	var lastEmailSent time.Time
 	err := db.QueryRow(`
