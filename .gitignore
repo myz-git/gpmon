@@ -5,3 +5,7 @@ log/
 *.log
 go.mod
 go.sum
+orasvc
+mysqlsvc
+db2svc
+startgpmon
