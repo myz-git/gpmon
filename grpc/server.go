@@ -22,7 +22,7 @@ func (s *Server) SendStatus(ctx context.Context, status *proto.DatabaseStatus) (
 	// Adjust timestamp to consider local timezone
 	const base_format = "2006-01-02 15:04:05"
 	localTimestamp := status.Timestamp.AsTime().In(time.Local)
-	log.Printf("%s,%s,%s,%s,%s", status.Ip, status.Dbtype, status.Dbnm, status.CheckNm, status.CheckResult)
+	log.Printf(":==>%s,%v,%s,%s,%s,%s", status.Ip, status.Port, status.Dbtype, status.Dbnm, status.CheckNm, status.CheckResult)
 	// Insert check result into check_results table
 	// err := db.InsertCheckResult(status.Ip, int(status.Port), status.Dbtype, status.Dbnm, status.CheckNm, status.CheckLvl, status.Details)
 	// if err != nil {

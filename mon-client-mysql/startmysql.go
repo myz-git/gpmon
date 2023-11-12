@@ -33,15 +33,22 @@ func getMySQLClientInfos(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error
 	return response.ClientInfos, nil
 }
 
-func performMySQLCheck(serverIP string, clientInfo *proto.ClientInfo, check db.CheckItem) {
+func performMySQLCheck(serverIP string, clientInfo *proto.ClientInfo, check db.MYSQLCheckItem) {
 
-	DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`,
+	DSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true",
 		clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
 
 	// Execute the SQL check based on check.CheckSQL
-	status, details, _ := db.ExecuteCheck(DSN, check)
+	log.Printf("check:==>%v", check.CheckName)
 
-	err := db.InsertCheckResult(clientInfo.Ip, clientInfo.Port, clientInfo.DbType, clientInfo.DbName, check.CheckName, status, details)
+	status, details, err := db.ExecuteCheckMYSQL(DSN, check)
+
+	if err != nil {
+		log.Printf("Failed check '%s' for IP %s with error: %v", check.CheckName, clientInfo.Ip, err)
+		// You may want to insert a failed check result here and continue or return
+	}
+
+	err = db.InsertCheckResult(clientInfo.Ip, clientInfo.Port, clientInfo.DbType, clientInfo.DbName, check.CheckName, status, details)
 	if err != nil {
 		log.Printf("Failed check '%s' for IP %s", check.CheckName, clientInfo.Ip)
 	}
@@ -110,7 +117,7 @@ func main() {
 	serverIP := os.Args[1]
 	dbTypeReq := "MYSQL"
 	// Retrieve all enabled checks
-	checks, err := db.GetEnabledChecks(dbTypeReq)
+	checks, err := db.GetEnabledChecksMYSQL(dbTypeReq)
 	if err != nil {
 		log.Fatalf("Failed to get enabled checks: %v", err)
 	}

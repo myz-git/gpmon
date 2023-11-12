@@ -12,7 +12,7 @@ func main() {
 	// Replace with your own database information
 	user := "root"
 	password := "111111"
-	host := "1.1.1.201:3306" // or "your_host:your_port"
+	host := "1.1.1.201:3307" // or "your_host:your_port"
 	dbname := "mysql"
 
 	// Construct the DSN (Data Source Name)
@@ -35,7 +35,7 @@ func main() {
 
 	// Optionally, you could run a simple query
 	var version string
-	err = db.QueryRow("SELECT VERSION()").Scan(&version)
+	err = db.QueryRow("show slave status").Scan(&version)
 	if err != nil {
 		log.Fatalf("Error running query: %v", err)
 	} else {
