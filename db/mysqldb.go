@@ -39,7 +39,7 @@ func GetEnabledChecksMYSQL(dbType string) ([]MYSQLCheckItem, error) {
 
 // ExecuteCheck executes a single SQL check against the database and returns the result along with the check level.
 // ExecuteCheckMYSQL executes a single SQL check against the database and returns the result along with the check level.
-func ExecuteCheckMYSQL(DSN string, check MYSQLCheckItem) (status string, details string, err error) {
+func ExecuteCheckMYSQL(DSN string, check CheckItem) (status string, details string, err error) {
 	mysqlDB, err := sql.Open("mysql", DSN)
 	if err != nil {
 		return "ERROR", "Cannot connect to MySQL database", err

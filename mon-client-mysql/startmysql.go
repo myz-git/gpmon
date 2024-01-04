@@ -33,7 +33,7 @@ func getMySQLClientInfos(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error
 	return response.ClientInfos, nil
 }
 
-func performMySQLCheck(serverIP string, clientInfo *proto.ClientInfo, check db.MYSQLCheckItem) {
+func performMySQLCheck(serverIP string, clientInfo *proto.ClientInfo, check db.CheckItem) {
 
 	DSN := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true",
 		clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
@@ -134,27 +134,51 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to retrieve configurations: %v", err)
 	}
+
+	// 初始化时对每个客户端执行配置的检查项
 	for _, clientInfo := range clientInfos {
-		for _, check := range checks {
-			// log.Printf("client_main-> init-> performCheck,%s", clientInfo.Ip)
+		// 获取客户端配置的相关检查项ID列表
+		fmt.Printf("clientInfo.Id: %v\n", clientInfo.Id)
+		checkIDs, err := db.GetClientChecks(clientInfo.Id)
+		if err != nil {
+			log.Printf("Failed to get checks for client %v: %v", clientInfo.Id, err)
+			continue
+		}
+		// 对于每个检查项ID，找到对应的检查配置并执行检查
+		fmt.Printf("checkIDs: %v\n", checkIDs)
+		for _, checkID := range checkIDs {
+			check, err := db.GetCheckItemByID(checkID)
+			if err != nil {
+				log.Printf("Failed to get check item for ID %v: %v", checkID, err)
+				continue
+			}
 			performMySQLCheck(serverIP, clientInfo, check)
 		}
 	}
 
-	// Start an infinite loop for each check
+	// 定时任务循环
 	for {
-		for _, check := range checks {
-			ticker := tickers[check.ID]
-			select {
-			case <-ticker.C:
-				for _, clientInfo := range clientInfos {
-					// log.Printf("client_main-> for-> performCheck,%s", clientInfo.Ip)
-					performMySQLCheck(serverIP, clientInfo, check)
+		for _, clientInfo := range clientInfos {
+			checkIDs, err := db.GetClientChecks(clientInfo.Id)
+			if err != nil {
+				log.Printf("Failed to get checks for client %v: %v", clientInfo.Id, err)
+				continue
+			}
+			for _, checkID := range checkIDs {
+				check, err := db.GetCheckItemByID(checkID)
+				if err != nil {
+					log.Printf("Failed to get check item for ID %v: %v", checkID, err)
+					continue
 				}
-			default:
-				// Non-blocking select to allow multiple tickers
+				ticker := tickers[check.ID]
+				select {
+				case <-ticker.C:
+					performMySQLCheck(serverIP, clientInfo, check)
+				default:
+					// 非阻塞select
+				}
 			}
 		}
-		time.Sleep(1 * time.Second) // Sleep to prevent a busy loop
+		time.Sleep(1 * time.Second)
 	}
 }

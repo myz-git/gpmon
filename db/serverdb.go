@@ -14,6 +14,7 @@ import (
 var db *sql.DB
 
 type ClientConfig struct {
+	ID      int32
 	IP      string
 	Port    int32
 	DbType  string
@@ -75,7 +76,7 @@ func InsertCheckResult(ip string, port int32, dbtype, dbname, checkname, checkRe
 
 // GetClientInfos retrieves all the active client configurations for a given DB type.
 func GetClientInfos(targetDbType string) ([]ClientConfig, error) {
-	rows, err := db.Query("SELECT ip, port, dbtype, dbname, dbuser, userpwd FROM client_info WHERE isenable=1 and dbtype = ?", targetDbType)
+	rows, err := db.Query("SELECT id,ip, port, dbtype, dbname, dbuser, userpwd FROM client_info WHERE isenable=1 and dbtype = ?", targetDbType)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +85,7 @@ func GetClientInfos(targetDbType string) ([]ClientConfig, error) {
 	var configs []ClientConfig
 	for rows.Next() {
 		var config ClientConfig
-		err := rows.Scan(&config.IP, &config.Port, &config.DbType, &config.DbName, &config.DbUser, &config.UserPwd)
+		err := rows.Scan(&config.ID, &config.IP, &config.Port, &config.DbType, &config.DbName, &config.DbUser, &config.UserPwd)
 		if err != nil {
 			return nil, err
 		}
@@ -126,4 +127,40 @@ func InsertCheckhis(ip string, port int32, dbtype string, dbnm string, checkname
 	VALUES (?, ?, ?, ?, ?,?, ?)
 	`, ip, port, dbtype, dbnm, checkname, checkresult, details)
 	return err
+}
+
+// GetClientChecks 获取与特定客户端相关联的所有检查项ID
+func GetClientChecks(clientID int32) ([]int, error) {
+	var checkIDs []int
+	rows, err := db.Query("SELECT check_id FROM check_map WHERE client_id = ? and isenable = 1", clientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var checkID int
+		if err := rows.Scan(&checkID); err != nil {
+			return nil, err
+		}
+		checkIDs = append(checkIDs, checkID)
+	}
+
+	return checkIDs, nil
+}
+
+func GetCheckItemByID(checkID int) (CheckItem, error) {
+	var check CheckItem
+	err := db.QueryRow("SELECT id, checknm, checksql, checklvl, freq, isenable FROM dbmonsql WHERE id = ? and isenable=1", checkID).Scan(
+		&check.ID,
+		&check.CheckName,
+		&check.CheckSQL,
+		&check.CheckLvl,
+		&check.Frequency,
+		&check.IsEnable,
+	)
+	if err != nil {
+		return check, err
+	}
+	return check, nil
 }

@@ -38,7 +38,7 @@ func GetEnabledChecksDB2(dbType string) ([]DB2CheckItem, error) {
 }
 
 // ExecuteCheckDB2 executes a single SQL check against the DB2 database and returns the result along with the check level.
-func ExecuteCheckDB2(DSN string, check DB2CheckItem) (status string, details string, err error) {
+func ExecuteCheckDB2(DSN string, check CheckItem) (status string, details string, err error) {
 	db, err := sql.Open("go_ibm_db", DSN)
 	if err != nil {
 		return "ERROR", "Cannot connect to database", err

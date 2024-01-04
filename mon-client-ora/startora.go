@@ -124,26 +124,49 @@ func main() {
 		log.Fatalf("Failed to retrieve configurations: %v", err)
 	}
 	for _, clientInfo := range clientInfos {
-		for _, check := range checks {
-			// log.Printf("client_main-> init-> performCheck,%s", clientInfo.Ip)
+		// 获取客户端配置的相关检查项ID列表
+		checkIDs, err := db.GetClientChecks(clientInfo.Id)
+		if err != nil {
+			log.Printf("Failed to get check IDs for client %d: %v", clientInfo.Id, err)
+			continue
+		}
+		// 对于每个检查项ID，找到对应的检查配置并执行检查
+		for _, checkID := range checkIDs {
+			check, err := db.GetCheckItemByID(checkID)
+			if err != nil {
+				log.Printf("Failed to get check %d: %v", checkID, err)
+				continue
+			}
 			performCheck(serverIP, clientInfo, check)
 		}
 	}
 
 	// 开始定时任务循环,执行频率根据check.freq
-	for { //无限循环
-		for _, check := range checks {
-			ticker := tickers[check.ID]
-			select {
-			case <-ticker.C:
-				for _, clientInfo := range clientInfos {
-					// log.Printf("client_main-> for-> performCheck,%s", clientInfo.Ip)
-					performCheck(serverIP, clientInfo, check)
+	for {
+		for _, clientInfo := range clientInfos {
+			checkIDs, err := db.GetClientChecks(clientInfo.Id)
+			if err != nil {
+				log.Printf("Failed to get check IDs for client %d: %v", clientInfo.Id, err)
+				continue
+			}
+
+			for _, checkID := range checkIDs {
+				check, err := db.GetCheckItemByID(checkID)
+				if err != nil {
+					log.Printf("Failed to get check %d: %v", checkID, err)
+					continue
 				}
-			default:
-				// Non-blocking select to allow multiple tickers
+
+				// 如果是时间执行检查，则进行检查
+				ticker := tickers[check.ID]
+				select {
+				case <-ticker.C:
+					performCheck(serverIP, clientInfo, check)
+				default:
+					// 非阻塞 select
+				}
 			}
 		}
-		time.Sleep(1 * time.Second) // Sleep to prevent a busy loop
+		time.Sleep(1 * time.Second) // 防止忙等
 	}
 }

@@ -44,5 +44,6 @@ message ClientInfo {
     string DbUser = 5;
     string UserPwd = 6;
     bool IsEnable = 7;
+    int32 id = 8; 
 }
 

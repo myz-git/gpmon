@@ -66,6 +66,7 @@ func (c *ClientInfoServer) GetClientInfo(ctx context.Context, req *proto.ClientI
 	clientInfos := make([]*proto.ClientInfo, 0, len(clients))
 	for _, client := range clients {
 		clientInfos = append(clientInfos, &proto.ClientInfo{
+			Id:      client.ID,
 			Ip:      client.IP,
 			Port:    client.Port,
 			DbType:  client.DbType,

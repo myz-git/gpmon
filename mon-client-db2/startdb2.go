@@ -35,7 +35,7 @@ func getClientInfos_db2(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error)
 	return response.ClientInfos, nil
 }
 
-func performCheck_db2(serverIP string, clientInfo *proto.ClientInfo, check db.DB2CheckItem) {
+func performCheck_db2(serverIP string, clientInfo *proto.ClientInfo, check db.CheckItem) {
 
 	// DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`,
 	// 	clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
@@ -129,30 +129,59 @@ func main() {
 
 	// Perform the initial check before starting the loop
 	clientInfos, err := getClientInfos_db2(serverIP, dbTypeReq)
+	fmt.Printf("clientInfos: %v\n", clientInfos)
 	if err != nil {
 		log.Fatalf("Failed to retrieve configurations: %v", err)
 	}
 	for _, clientInfo := range clientInfos {
-		for _, check := range checks {
-			// log.Printf("client_main-> init-> performCheck,%s", clientInfo.Ip)
+		// 获取客户端配置的相关检查项ID列表
+		checkIDs, err := db.GetClientChecks(clientInfo.Id)
+		if err != nil {
+			log.Printf("Failed to get checks for client %v: %v", clientInfo.Id, err)
+			continue
+		}
+
+		// 对于每个检查项ID，找到对应的检查配置并执行检查
+		for _, checkID := range checkIDs {
+			check, err := db.GetCheckItemByID(checkID) // 假设你有这样一个函数来获取检查项
+			if err != nil {
+				log.Printf("Failed to get check item for ID %v: %v", checkID, err)
+				continue
+			}
 			performCheck_db2(serverIP, clientInfo, check)
 		}
 	}
 
 	// Start an infinite loop for each check
 	for {
-		for _, check := range checks {
-			ticker := tickers[check.ID]
-			select {
-			case <-ticker.C:
-				for _, clientInfo := range clientInfos {
-					// log.Printf("client_main-> for-> performCheck,%s", clientInfo.Ip)
-					performCheck_db2(serverIP, clientInfo, check)
+		for _, clientInfo := range clientInfos {
+			// 获取客户端对应的检查项
+			checkIDs, err := db.GetClientChecks(clientInfo.Id)
+			if err != nil {
+				log.Printf("Failed to get checks for client %v: %v", clientInfo.Id, err)
+				continue
+			}
+
+			for _, checkID := range checkIDs {
+				check, err := db.GetCheckItemByID(checkID) // 假设你有这样一个函数来获取检查项
+
+				if err != nil {
+					log.Printf("Failed to get check item for ID %v: %v", checkID, err)
+					continue
 				}
-			default:
-				// Non-blocking select to allow multiple tickers
+
+				// 这里我们使用定时器确保按照指定频率执行检查
+				ticker := tickers[check.ID]
+				select {
+				case <-ticker.C:
+					// 执行检查
+					performCheck_db2(serverIP, clientInfo, check)
+				default:
+					// Non-blocking select to allow multiple tickers
+				}
 			}
 		}
 		time.Sleep(1 * time.Second) // Sleep to prevent a busy loop
 	}
+
 }
