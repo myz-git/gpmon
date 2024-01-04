@@ -1,11 +1,8 @@
 local/
 log/
+deploy/
 *.txt
 *.db
 *.log
 go.mod
 go.sum
-orasvc
-mysqlsvc
-db2svc
-startgpmon
