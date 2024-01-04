@@ -138,14 +138,12 @@ func main() {
 	// 初始化时对每个客户端执行配置的检查项
 	for _, clientInfo := range clientInfos {
 		// 获取客户端配置的相关检查项ID列表
-		fmt.Printf("clientInfo.Id: %v\n", clientInfo.Id)
 		checkIDs, err := db.GetClientChecks(clientInfo.Id)
 		if err != nil {
 			log.Printf("Failed to get checks for client %v: %v", clientInfo.Id, err)
 			continue
 		}
 		// 对于每个检查项ID，找到对应的检查配置并执行检查
-		fmt.Printf("checkIDs: %v\n", checkIDs)
 		for _, checkID := range checkIDs {
 			check, err := db.GetCheckItemByID(checkID)
 			if err != nil {

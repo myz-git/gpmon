@@ -129,7 +129,6 @@ func main() {
 
 	// Perform the initial check before starting the loop
 	clientInfos, err := getClientInfos_db2(serverIP, dbTypeReq)
-	fmt.Printf("clientInfos: %v\n", clientInfos)
 	if err != nil {
 		log.Fatalf("Failed to retrieve configurations: %v", err)
 	}
@@ -140,10 +139,11 @@ func main() {
 			log.Printf("Failed to get checks for client %v: %v", clientInfo.Id, err)
 			continue
 		}
-
+		// fmt.Printf("===>clientInfo: %v\n", clientInfo)
 		// 对于每个检查项ID，找到对应的检查配置并执行检查
 		for _, checkID := range checkIDs {
 			check, err := db.GetCheckItemByID(checkID) // 假设你有这样一个函数来获取检查项
+			// fmt.Printf("======>checkID: %v\n", checkID)
 			if err != nil {
 				log.Printf("Failed to get check item for ID %v: %v", checkID, err)
 				continue
@@ -164,9 +164,10 @@ func main() {
 
 			for _, checkID := range checkIDs {
 				check, err := db.GetCheckItemByID(checkID) // 假设你有这样一个函数来获取检查项
-
+				// fmt.Printf("=========>checkID22: %v\n", checkID)
+				// fmt.Printf("=========>clientInfo22: %v\n", clientInfo.Ip)
 				if err != nil {
-					log.Printf("Failed to get check item for ID %v: %v", checkID, err)
+					log.Printf("Failed to get check item for ID22 %v: %v", checkID, err)
 					continue
 				}
 
