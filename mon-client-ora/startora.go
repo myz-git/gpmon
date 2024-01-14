@@ -77,7 +77,7 @@ func performCheck(serverIP string, clientInfo *proto.ClientInfo, check db.CheckI
 
 	}
 
-	log.Printf("Response from server for IP %s: %s: %s", clientInfo.Ip, check.CheckName, response.Message)
+	log.Printf("Response from ID[%v] %s:%v: %v: %s: %s", clientInfo.Id, clientInfo.Ip, clientInfo.Port, clientInfo.DbName, check.CheckName, response.Message)
 }
 
 func main() {
@@ -142,31 +142,50 @@ func main() {
 	}
 
 	// 开始定时任务循环,执行频率根据check.freq
-	for {
-		for _, clientInfo := range clientInfos {
-			checkIDs, err := db.GetClientChecks(clientInfo.Id)
-			if err != nil {
-				log.Printf("Failed to get check IDs for client %d: %v", clientInfo.Id, err)
-				continue
-			}
+	// Start an infinite loop for each check
+	for _, clientInfo := range clientInfos {
+		go func(client *proto.ClientInfo) {
+			// 为每个客户端创建一个独立的定时器集合
+			clientTickers := make(map[int]*time.Ticker)
 
-			for _, checkID := range checkIDs {
-				check, err := db.GetCheckItemByID(checkID)
+			for {
+				// 获取客户端对应的检查项
+				checkIDs, err := db.GetClientChecks(client.Id)
 				if err != nil {
-					log.Printf("Failed to get check %d: %v", checkID, err)
+					log.Printf("Failed to get checks for client %v: %v", client.Id, err)
 					continue
 				}
 
-				// 如果是时间执行检查，则进行检查
-				ticker := tickers[check.ID]
-				select {
-				case <-ticker.C:
-					performCheck(serverIP, clientInfo, check)
-				default:
-					// 非阻塞 select
+				for _, checkID := range checkIDs {
+					check, err := db.GetCheckItemByID(checkID)
+					if err != nil {
+						log.Printf("Failed to get check item for ID %v: %v", checkID, err)
+						continue
+					}
+
+					// 为每个检查项创建或获取定时器
+					ticker, ok := clientTickers[check.ID]
+					if !ok {
+						ticker = time.NewTicker(time.Duration(check.Frequency) * time.Minute)
+						clientTickers[check.ID] = ticker
+						defer ticker.Stop()
+					}
+
+					select {
+					case <-ticker.C:
+						// fmt.Printf("=========>定时检查checkID: %v ,clientInfo:  %v %v %v\n", checkID, client.Id, client.DbType, client.DbName)
+						performCheck(serverIP, client, check)
+					default:
+
+						// 非阻塞 select
+					}
 				}
+
+				time.Sleep(10 * time.Second) // 防止忙循环
 			}
-		}
-		time.Sleep(1 * time.Second) // 防止忙等
+		}(clientInfo)
 	}
+
+	// 防止主程序退出
+	select {}
 }

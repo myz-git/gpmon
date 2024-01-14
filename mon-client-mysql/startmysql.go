@@ -89,7 +89,7 @@ func performMySQLCheck(serverIP string, clientInfo *proto.ClientInfo, check db.C
 	// if err != nil {
 	// 	log.Printf("Failed to insert check result for IP %s: %v", clientInfo.Ip, err)
 	// }
-	log.Printf("Response from server for IP %s: %s: %s", clientInfo.Ip, check.CheckName, response.Message)
+	log.Printf("Response from ID[%v] %s:%v: %v: %s: %s", clientInfo.Id, clientInfo.Ip, clientInfo.Port, clientInfo.DbName, check.CheckName, response.Message)
 }
 
 func main() {
@@ -154,29 +154,50 @@ func main() {
 		}
 	}
 
-	// 定时任务循环
-	for {
-		for _, clientInfo := range clientInfos {
-			checkIDs, err := db.GetClientChecks(clientInfo.Id)
-			if err != nil {
-				log.Printf("Failed to get checks for client %v: %v", clientInfo.Id, err)
-				continue
-			}
-			for _, checkID := range checkIDs {
-				check, err := db.GetCheckItemByID(checkID)
+	// Start an infinite loop for each check
+	for _, clientInfo := range clientInfos {
+		go func(client *proto.ClientInfo) {
+			// 为每个客户端创建一个独立的定时器集合
+			clientTickers := make(map[int]*time.Ticker)
+
+			for {
+				// 获取客户端对应的检查项
+				checkIDs, err := db.GetClientChecks(client.Id)
 				if err != nil {
-					log.Printf("Failed to get check item for ID %v: %v", checkID, err)
+					log.Printf("Failed to get checks for client %v: %v", client.Id, err)
 					continue
 				}
-				ticker := tickers[check.ID]
-				select {
-				case <-ticker.C:
-					performMySQLCheck(serverIP, clientInfo, check)
-				default:
-					// 非阻塞select
+
+				for _, checkID := range checkIDs {
+					check, err := db.GetCheckItemByID(checkID)
+					if err != nil {
+						log.Printf("Failed to get check item for ID %v: %v", checkID, err)
+						continue
+					}
+
+					// 为每个检查项创建或获取定时器
+					ticker, ok := clientTickers[check.ID]
+					if !ok {
+						ticker = time.NewTicker(time.Duration(check.Frequency) * time.Minute)
+						clientTickers[check.ID] = ticker
+						defer ticker.Stop()
+					}
+
+					select {
+					case <-ticker.C:
+						// fmt.Printf("=========>定时检查checkID: %v ,clientInfo:  %v %v %v\n", checkID, client.Id, client.DbType, client.DbName)
+						performMySQLCheck(serverIP, client, check)
+					default:
+
+						// 非阻塞 select
+					}
 				}
+
+				time.Sleep(10 * time.Second) // 防止忙循环
 			}
-		}
-		time.Sleep(1 * time.Second)
+		}(clientInfo)
 	}
+
+	// 防止主程序退出
+	select {}
 }

@@ -86,7 +86,7 @@ func performCheck_db2(serverIP string, clientInfo *proto.ClientInfo, check db.Ch
 	// if err != nil {
 	// 	log.Printf("Failed to insert check result for IP %s: %v", clientInfo.Ip, err)
 	// }
-	log.Printf("Response from server for IP %s: %s: %s", clientInfo.Ip, check.CheckName, response.Message)
+	log.Printf("Response from ID[%v] %s:%v: %v: %s: %s", clientInfo.Id, clientInfo.Ip, clientInfo.Port, clientInfo.DbName, check.CheckName, response.Message)
 }
 
 func main() {
@@ -135,6 +135,7 @@ func main() {
 	for _, clientInfo := range clientInfos {
 		// 获取客户端配置的相关检查项ID列表
 		checkIDs, err := db.GetClientChecks(clientInfo.Id)
+
 		if err != nil {
 			log.Printf("Failed to get checks for client %v: %v", clientInfo.Id, err)
 			continue
@@ -143,6 +144,7 @@ func main() {
 		// 对于每个检查项ID，找到对应的检查配置并执行检查
 		for _, checkID := range checkIDs {
 			check, err := db.GetCheckItemByID(checkID) // 假设你有这样一个函数来获取检查项
+			// fmt.Printf("=========>初始检查checkid: %v,clientInfo: %v %v %v\n", check, clientInfo.Id, clientInfo.DbType, clientInfo.DbName)
 			// fmt.Printf("======>checkID: %v\n", checkID)
 			if err != nil {
 				log.Printf("Failed to get check item for ID %v: %v", checkID, err)
@@ -153,36 +155,49 @@ func main() {
 	}
 
 	// Start an infinite loop for each check
-	for {
-		for _, clientInfo := range clientInfos {
-			// 获取客户端对应的检查项
-			checkIDs, err := db.GetClientChecks(clientInfo.Id)
-			if err != nil {
-				log.Printf("Failed to get checks for client %v: %v", clientInfo.Id, err)
-				continue
-			}
+	for _, clientInfo := range clientInfos {
+		go func(client *proto.ClientInfo) {
+			// 为每个客户端创建一个独立的定时器集合
+			clientTickers := make(map[int]*time.Ticker)
 
-			for _, checkID := range checkIDs {
-				check, err := db.GetCheckItemByID(checkID) // 假设你有这样一个函数来获取检查项
-				// fmt.Printf("=========>checkID22: %v\n", checkID)
-				// fmt.Printf("=========>clientInfo22: %v\n", clientInfo.Ip)
+			for {
+				// 获取客户端对应的检查项
+				checkIDs, err := db.GetClientChecks(client.Id)
 				if err != nil {
-					log.Printf("Failed to get check item for ID22 %v: %v", checkID, err)
+					log.Printf("Failed to get checks for client %v: %v", client.Id, err)
 					continue
 				}
 
-				// 这里我们使用定时器确保按照指定频率执行检查
-				ticker := tickers[check.ID]
-				select {
-				case <-ticker.C:
-					// 执行检查
-					performCheck_db2(serverIP, clientInfo, check)
-				default:
-					// Non-blocking select to allow multiple tickers
+				for _, checkID := range checkIDs {
+					check, err := db.GetCheckItemByID(checkID)
+					if err != nil {
+						log.Printf("Failed to get check item for ID %v: %v", checkID, err)
+						continue
+					}
+
+					// 为每个检查项创建或获取定时器
+					ticker, ok := clientTickers[check.ID]
+					if !ok {
+						ticker = time.NewTicker(time.Duration(check.Frequency) * time.Minute)
+						clientTickers[check.ID] = ticker
+						defer ticker.Stop()
+					}
+
+					select {
+					case <-ticker.C:
+						// fmt.Printf("=========>定时检查checkID: %v ,clientInfo:  %v %v %v\n", checkID, client.Id, client.DbType, client.DbName)
+						performCheck_db2(serverIP, client, check)
+					default:
+
+						// 非阻塞 select
+					}
 				}
+
+				time.Sleep(10 * time.Second) // 防止忙循环
 			}
-		}
-		time.Sleep(1 * time.Second) // Sleep to prevent a busy loop
+		}(clientInfo)
 	}
 
+	// 防止主程序退出
+	select {}
 }

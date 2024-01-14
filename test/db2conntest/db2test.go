@@ -38,7 +38,7 @@ func main() {
 	connStr := fmt.Sprintf("HOSTNAME=%s;DATABASE=%s;PORT=%s;UID=%s;PWD=%s",
 		config.Hostname, config.Database, config.Port, config.Username, config.Password)
 
-	connStr = "HOSTNAME=1.1.1.96;DATABASE=myzdb;PORT=60000;UID=db2inst1;PWD=oracle"
+	// connStr = "HOSTNAME=1.1.1.97;DATABASE=myzdb;PORT=50000;UID=db2inst1;PWD=oracle"
 
 	// 连接数据库
 	db, err := sql.Open("go_ibm_db", connStr)
