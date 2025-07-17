@@ -43,18 +43,18 @@ func performCheck_db2(serverIP string, clientInfo *proto.ClientInfo, check db.Ch
 	var err error
 
 	// 最大重试次数
-	maxRetries := 3
+	maxRetries := 30
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// 尝试执行数据库检查
 		status, details, err = db.ExecuteCheckDB2(DSN, check)
 
 		if err != nil {
-			log.Printf("Attempt %d: Failed check '%s' for IP %s with error: %v", attempt, check.CheckName, clientInfo.Ip, err)
+			log.Printf("第%d次尝试，共%d次: Failed check '%s' for IP %s with error: %v", attempt, maxRetries, check.CheckName, clientInfo.Ip, err)
 
 			if attempt < maxRetries {
 				// 如果不是最后一次尝试，等待一段时间后重试
-				time.Sleep(5 * time.Second)
+				time.Sleep(10 * time.Second)
 				continue
 			} else {
 				// 连续两次失败，处理失败情况

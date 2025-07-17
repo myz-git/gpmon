@@ -34,19 +34,57 @@ func getClientInfos(serverIP, dbTypeReq string) ([]*proto.ClientInfo, error) {
 }
 
 func performCheck(serverIP string, clientInfo *proto.ClientInfo, check db.CheckItem) {
-
 	DSN := fmt.Sprintf(`user="%s" password="%s" connectString="%s:%d/%s" timezone=UTC`,
 		clientInfo.DbUser, clientInfo.UserPwd, clientInfo.Ip, clientInfo.Port, clientInfo.DbName)
 
-	// Execute the SQL check based on check.CheckSQL
-	status, details, _ := db.ExecuteCheck(DSN, check)
+	var status, details string
+	var err error
 
-	err := db.InsertCheckResult(clientInfo.Ip, clientInfo.Port, clientInfo.DbType, clientInfo.DbName, check.CheckName, status, details)
-	if err != nil {
-		log.Printf("Failed check '%s' for IP %s", check.CheckName, clientInfo.Ip)
+	// 最大重试次数
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// 尝试执行数据库检查
+		status, details, err = db.ExecuteCheck(DSN, check)
+
+		if err != nil {
+			log.Printf("第%d次尝试，共%d次: Failed check '%s' for IP %s with error: %v", attempt, maxRetries, check.CheckName, clientInfo.Ip, err)
+
+			if attempt < maxRetries {
+				// 如果不是最后一次尝试，等待5秒后重试
+				log.Printf("等待5秒后重试...")
+				time.Sleep(5 * time.Second)
+				continue
+			} else {
+				// 所有尝试都失败了，跳出循环
+				log.Printf("所有%d次尝试都失败，将记录最后一次的错误结果", maxRetries)
+				break
+			}
+		} else {
+			// 成功，跳出循环
+			if attempt > 1 {
+				log.Printf("第%d次尝试成功: check '%s' for IP %s", attempt, check.CheckName, clientInfo.Ip)
+			}
+			break
+		}
 	}
 
-	// Prepare message to send
+	if err != nil {
+		// 所有尝试都失败了，记录错误状态
+		status = "ERROR"
+		if details == "" {
+			details = fmt.Sprintf("检查失败，重试%d次后仍然失败: %v", maxRetries, err)
+		}
+		log.Printf("Failed check '%s' for IP %s after %d attempts: %v", check.CheckName, clientInfo.Ip, maxRetries, err)
+	}
+
+	// 插入检查结果到数据库
+	err = db.InsertCheckResult(clientInfo.Ip, clientInfo.Port, clientInfo.DbType, clientInfo.DbName, check.CheckName, status, details)
+	if err != nil {
+		log.Printf("Failed to insert check result for IP %s: %v", clientInfo.Ip, err)
+	}
+
+	// 准备要发送的消息
 	msg := &proto.DatabaseStatus{
 		Ip:          clientInfo.Ip,
 		Port:        clientInfo.Port,
@@ -58,23 +96,23 @@ func performCheck(serverIP string, clientInfo *proto.ClientInfo, check db.CheckI
 		Timestamp:   timestamppb.Now(),
 	}
 
-	// Adjust the timestamp to consider local timezone
+	// 考虑本地时区调整时间戳
 	localNow := time.Now().In(time.Local)
 	msg.Timestamp = timestamppb.New(localNow)
 
-	// Send the message to the gRPC server
+	// 发送消息到gRPC服务器
 	conn, err := grpc.Dial(fmt.Sprintf("%s:5051", serverIP), grpc.WithInsecure())
 	if err != nil {
 		log.Printf("Failed to connect to server: %v", err)
-
+		return
 	}
 	defer conn.Close()
-	c := proto.NewDatabaseStatusServiceClient(conn)
 
+	c := proto.NewDatabaseStatusServiceClient(conn)
 	response, err := c.SendStatus(context.Background(), msg)
 	if err != nil {
 		log.Printf("Failed to send status for IP %s: %v", clientInfo.Ip, err)
-
+		return
 	}
 
 	log.Printf("Response from ID[%v] %s:%v: %v: %s: %s", clientInfo.Id, clientInfo.Ip, clientInfo.Port, clientInfo.DbName, check.CheckName, response.Message)
@@ -176,7 +214,6 @@ func main() {
 						// fmt.Printf("=========>定时检查checkID: %v ,clientInfo:  %v %v %v\n", checkID, client.Id, client.DbType, client.DbName)
 						performCheck(serverIP, client, check)
 					default:
-
 						// 非阻塞 select
 					}
 				}
