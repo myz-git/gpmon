@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"time"
 
+	"gpmon/utils"
+
 	_ "github.com/mattn/go-sqlite3"
 	"gopkg.in/gomail.v2"
 )
@@ -81,11 +83,11 @@ func SendEmailWithHTML(subject, textBody, htmlBody, htmlFile string, customRecip
 	if customRecipient != "" {
 		recipient = customRecipient
 	}
-	m.SetHeader("To", recipient)
-
-	// 当CC不为空时设置抄送
-	if cfg.CC != "" {
-		m.SetHeader("Cc", cfg.CC)
+	if toAddrs := utils.ParseEmailAddresses(recipient); len(toAddrs) > 0 {
+		m.SetHeader("To", toAddrs...)
+	}
+	if ccAddrs := utils.ParseEmailAddresses(cfg.CC); len(ccAddrs) > 0 {
+		m.SetHeader("Cc", ccAddrs...)
 	}
 
 	// 设置主题

@@ -169,7 +169,26 @@ mail_cfg  邮件配置表
 check_result 数据库监控检查表(只保留当前数据),记录每一个数据库每一项监控的检查结果以及邮件发送时间
 check_his  数据库监控检查历史表, 类似check_result,它会保留所有监控记录
 详细见<<数据库设计.txt>>
+
+mail_cfg:
+
 ````
+
+mail_cfg:
+
+| 字段            | 类型         | 必填       | 说明                                                 |
+| :-------------- | :----------- | :--------- | :--------------------------------------------------- |
+| `id`            | INTEGER      | 自增主键   | 配置记录 ID                                          |
+| `sender`        | VARCHAR(30)  | 是         | 发件人邮箱                                           |
+| `recipient`     | VARCHAR(100) | 是         | 收件人，支持多个地址（逗号/分号分隔）                |
+| `cc`            | VARCHAR(100) | 否         | 抄送，支持多个地址（逗号/分号分隔）                  |
+| `smtp_server`   | VARCHAR(30)  | 是         | SMTP 服务器地址                                      |
+| `smtp_port`     | INTEGER      | 是         | SMTP 端口（如 587、465）                             |
+| `smtp_user`     | VARCHAR(30)  | 是         | SMTP 登录用户名                                      |
+| `smtp_password` | VARCHAR(30)  | 是         | SMTP 登录密码                                        |
+| `isenable`      | INTEGER      | 否，默认 0 | 是否启用（1=启用，程序只读取 `isenable=1` 的第一条） |
+
+
 
 ## 目标Oracle库监控用户及权限
 

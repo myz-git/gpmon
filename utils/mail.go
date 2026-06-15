@@ -5,8 +5,10 @@ package utils
 import (
 	"database/sql"
 	"log"
+	"net/mail"
 	"path"
 	"runtime"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 	"gopkg.in/gomail.v2"
@@ -59,6 +61,38 @@ func ReadMailConfig() (*MailConfig, error) {
 	return &cfg, nil
 }
 
+// ParseEmailAddresses 将逗号/分号分隔的邮箱字符串解析为地址列表
+func ParseEmailAddresses(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+
+	if list, err := mail.ParseAddressList(s); err == nil {
+		addrs := make([]string, 0, len(list))
+		for _, a := range list {
+			addrs = append(addrs, a.Address)
+		}
+		return addrs
+	}
+
+	s = strings.ReplaceAll(s, ";", ",")
+	parts := strings.Split(s, ",")
+	addrs := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if a, err := mail.ParseAddress(p); err == nil {
+			addrs = append(addrs, a.Address)
+		} else {
+			addrs = append(addrs, p)
+		}
+	}
+	return addrs
+}
+
 // SendEmail 发送邮件并根据发送结果更新数据库
 func SendEmail(ip, dbType, dbName, subject, message string) error {
 	cfg, err := ReadMailConfig()
@@ -76,10 +110,11 @@ func SendEmail(ip, dbType, dbName, subject, message string) error {
 
 	// 设置发件人、收件人、主题和内容
 	m.SetHeader("From", cfg.Sender)
-	m.SetHeader("To", cfg.Recipient)
-	// 当CC不为空时设置抄送
-	if cfg.CC != "" {
-		m.SetHeader("Cc", cfg.CC)
+	if toAddrs := ParseEmailAddresses(cfg.Recipient); len(toAddrs) > 0 {
+		m.SetHeader("To", toAddrs...)
+	}
+	if ccAddrs := ParseEmailAddresses(cfg.CC); len(ccAddrs) > 0 {
+		m.SetHeader("Cc", ccAddrs...)
 	}
 	m.SetHeader("Subject", subject)
 	m.SetBody("text/plain", message)
