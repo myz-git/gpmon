@@ -56,7 +56,7 @@ check_dependencies() {
     # 检查邮件工具
     if [ ! -f "$MAIL_TOOL" ]; then
         echo "错误: 邮件工具不存在: $MAIL_TOOL"
-        echo "请先运行: $SCRIPT_DIR/build-mail-tool.sh"
+        echo "请先运行: $SCRIPT_DIR/build.sh --mail"
         exit 1
     fi
     

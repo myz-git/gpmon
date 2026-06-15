@@ -1,3 +1,5 @@
+//go:build db2
+
 // gpmon/db/db2db.go
 package db
 

@@ -148,7 +148,7 @@ show_status() {
     
     # 检查脚本文件
     echo "📝 脚本文件:"
-    local scripts=("send-daily-report.sh" "db-maintenance.sh" "build-mail-tool.sh" "setup-logrotate.sh")
+    local scripts=("build.sh" "send-daily-report.sh" "db-maintenance.sh" "build-mail-tool.sh" "setup-logrotate.sh")
     for script in "${scripts[@]}"; do
         if [ -f "$SCRIPT_DIR/$script" ]; then
             if [ -x "$SCRIPT_DIR/$script" ]; then
@@ -174,7 +174,7 @@ show_status() {
         fi
     else
         echo "  状态: ❌ 未编译"
-        echo "  建议运行: $SCRIPT_DIR/build-mail-tool.sh"
+        echo "  建议运行: $SCRIPT_DIR/build.sh --mail"
     fi
     
     echo ""
@@ -225,7 +225,7 @@ setup_all() {
     echo ""
     echo "注意事项:"
     echo "  - 日志轮转需要单独设置: sudo $SCRIPT_DIR/setup-logrotate.sh"
-    echo "  - 邮件工具需要先编译: $SCRIPT_DIR/build-mail-tool.sh"
+    echo "  - 邮件工具需要先编译: $SCRIPT_DIR/build.sh --mail"
     echo ""
     echo "日志文件:"
     echo "  - 维护日志: /var/log/gpmon-maintenance.log"

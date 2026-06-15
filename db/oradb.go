@@ -1,3 +1,5 @@
+//go:build oracle
+
 // gpmon/db/oradb.go
 package db
 
@@ -6,15 +8,6 @@ import (
 
 	_ "github.com/godror/godror"
 )
-
-type CheckItem struct {
-	ID        int
-	CheckName string
-	CheckSQL  string
-	CheckLvl  string // 添加检查级别字段
-	Frequency int
-	IsEnable  int
-}
 
 // GetEnabledChecks retrieves all enabled checks from the dbmonsql table.
 func GetEnabledChecks(dbType string) ([]CheckItem, error) {

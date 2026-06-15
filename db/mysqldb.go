@@ -1,3 +1,5 @@
+//go:build mysql
+
 // gpmon/db/mysqldb.go
 package db
 

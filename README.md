@@ -1,1035 +1,494 @@
-# 环境准备
+# GPMon 数据库监控系统
 
-   gpmon项目是基于gRPC协议微服务框架的数据库监控系统,  被监控的数据库有Oracle,Mysql,DB2,PostgreSQL等,以注册服务的形式来启用某一类数据库的监控;
+基于 gRPC 的数据库监控微服务，支持 Oracle、MySQL、DB2 等数据库。通过 Supervisor 管理常驻进程，配合运维脚本实现日报邮件、数据库维护与日志轮转。
+
+## 目录
+
+- [项目结构](#项目结构)
+- [快速开始（生产部署）](#快速开始生产部署)
+- [环境准备](#环境准备)
+- [编译](#编译)
+- [部署与运行](#部署与运行)
+- [运维脚本](#运维脚本)
+- [数据库配置](#数据库配置)
+- [本地开发调试](#本地开发调试)
+- [Proto 编译](#proto-编译)
+- [常见问题](#常见问题)
+- [Git 操作参考](#git-操作参考)
+
+---
 
 ## 项目结构
 
 ```
-GPMON
-├── db  
-│   ├── db2db.go
-│   ├── mysqldb.go
-│   ├── oradb.go
-│   └── serverdb.go
-├── go.mod
-├── go.sum
-├── grpc
-│   ├── client.go
-│   ├── proto
-│   │   ├── dbstatus_grpc.pb.go
-│   │   ├── dbstatus.pb.go
-│   │   └── dbstatus.proto
-│   └── server.go
-├── log
-├── messages.db
-├── mon-client-db2
-│   └── startdb2.go
-├── mon-client-mysql
-│   └── startmysql.go
-├── mon-client-ora
-│   └── startora.go
-├── mon-server
-│   └── main.go
-├── README.md
-└── utils
-    └── mail.go
-
+gpmon/
+├── mon-server/              # gRPC 服务端
+│   └── main.go
+├── mon-client-ora/          # Oracle 监控客户端
+│   └── startora.go
+├── mon-client-mysql/          # MySQL 监控客户端
+│   └── startmysql.go
+├── mon-client-db2/            # DB2 监控客户端
+│   └── startdb2.go
+├── grpc/                      # gRPC 通信层
+│   ├── server.go
+│   ├── client.go
+│   └── proto/
+├── db/                        # 数据库访问层
+├── utils/                     # 工具（邮件发送等）
+├── scripts/                   # 运维脚本
+│   ├── build.sh               # 统一编译脚本
+│   ├── build-mail-tool.sh     # 编译邮件工具（兼容入口）
+│   ├── send-daily-report.sh   # 日报发送
+│   ├── db-maintenance.sh      # 数据库维护
+│   ├── setup-maintenance.sh   # 定时任务安装
+│   └── setup-logrotate.sh     # 日志轮转安装
+├── install_cfg/               # 部署配置模板
+│   ├── bash_profile           # 环境变量参考
+│   └── supervisord.d/         # Supervisor 配置模板
+├── send_mail_cli.go           # 邮件工具源码
+├── messages.db                # SQLite 配置库
+└── log/                       # 应用日志目录
 ```
 
-## 文件说明
+### 编译产物（均在项目根目录）
 
-### db/oradb.go|db2db.go|mysqldb.go
+| 可执行文件 | 来源 | 说明 |
+|-----------|------|------|
+| `startgpmon` | mon-server | gRPC 服务端，监听 5051 |
+| `orasvc` | mon-client-ora | Oracle 监控客户端 |
+| `mysqlsvc` | mon-client-mysql | MySQL 监控客户端 |
+| `db2svc` | mon-client-db2 | DB2 监控客户端 |
+| `send_mail_cli` | send_mail_cli.go | 邮件发送工具 |
 
- 实现各数据库的告警项执行
+---
 
-### db/serverdb.go:
+## 快速开始（生产部署）
 
-它包含了与SQLite数据库交互的功能，例如初始化数据库连接、创建表、插入消息、获取客户端信息、更新客户端状态，以及管理邮件发送状态。
+以下假设项目部署在 `/workspace/gpmon`，按需修改路径。
 
-### grpc/server.go:
+```bash
+# 1. 获取代码
+cd /workspace/gpmon
+git pull
 
-这个文件定义了gRPC服务器端的实现，包括处理数据库状态更新的服务和客户端信息获取的服务
+# 2. 配置环境变量（Oracle Instant Client + DB2 clidriver）
+cp install_cfg/bash_profile ~/.bash_profile   # 按实际路径修改后 source
+source ~/.bash_profile
 
-### mon-client-ora/startora.go:
+# 3. 编译全部组件
+chmod +x scripts/*.sh
+./scripts/build.sh
 
-这个文件是一个Oracle监控服务入口点，使用gRPC与服务器通信，检索客户端配置信息，执行数据库检查，并将检查结果发送回服务器。
+# 4. 配置 Supervisor 并启动监控服务
+cp install_cfg/supervisord.d/*.ini /etc/supervisord.d/
+# 修改 ini 中的服务器 IP 和路径
+supervisorctl update
+supervisorctl start all
 
-其他startmysql.go,startdb2.go 功能相同;
+# 5. 安装运维定时任务（日报 + 数据库维护）
+sudo ./scripts/setup-maintenance.sh --setup
 
-### mon-server/main.go:
+# 6. 安装日志轮转（可选）
+sudo ./scripts/setup-logrotate.sh
 
-服务器的主程序，gRPC服务器的入口点,它监听TCP端口5051，并使用 grpc/server.go 中的逻辑处理来自客户端的请求，目前注册了两个服务：数据库状态服务和客户信息服务。
-
-### grpc/proto/dbstatus.proto:
-
-gRPC的消息和服务定义。
-这个文件定义了与gRPC服务相关的协议，其中包括了用于数据库状态和客户端信息的服务和消息类型
-
-### utils/mail.go
-
-这个文件定义了发送电子邮件的功能，它通过检查ShouldSendEmail函数来决定是否应该发送邮件，并在邮件发送后更新数据库中的状态。
-
-### grpc/client.go (可选):
-
-如果您的客户端gRPC逻辑相对复杂，并且您想将其与 mon-client/main.go 分开，可以在这里放置客户端的gRPC逻辑。
-
-grpc/client.go 和 grpc/server.go 包含具体的gRPC通信逻辑。例如，client.go 可能有一个函数，它接受一个数据库状态，并发送给gRPC服务器；而server.go可能有一个函数，它启动gRPC服务器，等待客户端消息，然后执行相应的操作。
-
-README.md 包含项目的文档，描述了如何设置、构建和运行项目。
-
-## 安装Oracle数据库Go驱动
-
-```
-cd mon
-go mod init mon
-go get github.com/godror/godror
-
-下载oracle客户端, 
-https://www.oracle.com/database/technologies/instant-client/winx64-64-downloads.html
-#for linux:
-#https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html
-解压到D:\Oracle\instantclient_19_20
-设置环境变量:
-TNS_ADMIN 指向  D:\Oracle\instantclient_19_20
-LD_LIBRARY_PATH 同样指向  D:\Oracle\instantclient_19_20
-
-注1:
-执行时报:
-Received status: ERROR, Details: ORA-00000: DPI-1047: Cannot locate a 64-bit Oracle Client library: "The specified module could not be found". 
-需要设置LD_LIBRARY_PATH, 然后编译 db.go时,SET CGO_ENABLED=1 启用交叉编译
-
-注2:
-执行时报:
-godror WARNING: discrepancy between DBTIMEZONE ("+00:00"=0) and SYSTIMESTAMP ("+08:00"=800) 
-可以在DSN中加入timezone=UTC ,如:
-const DSN = `user="username" password="password" connectString="ip:1521/oradb timezone=UTC"`
+# 7. 验证
+./scripts/db-maintenance.sh --status
+./scripts/send-daily-report.sh --test-mail
 ```
 
-### 安装 SQLite3 的 Go 驱动
+---
 
-```
-go get github.com/mattn/go-sqlite3
-```
+## 环境准备
 
+### Go 语言
 
+- 版本：Go 1.20+
+- Linux 安装参考：https://go.dev/dl/
 
-## 安装Db2驱动
-
-### For WIN:
-
-https://github.com/ibmdb/go_ibm_db
-
-```
-
-go get github.com/ibmdb/go_ibm_db
-go install github.com/ibmdb/go_ibm_db/installer@v0.4.3
-
-cd  C:\Program Files\Go\pkg\mod\github.com\ibmdb\go_ibm_db@v0.4.3\installer
-SET GOOS=windows
-SET GOARCH=amd64
-go run setup.go
-setenvwin.bat
-注: 会自动下载db2cli64.dll到 C:\Program Files\Go\pkg\mod\github.com\ibmdb\clidriver\bin\
-
-配置环境变量:
-IBM_DB_HOME=C:\Users\uname\go\src\github.com\ibmdb\clidriver
-PATH=%PATH%;%IBM_DB_HOME%\bin
-
-```
-
-**执行测试验证**:
-
-```
-cd gpmon
-go run db2test.go
-Connected to DB2 version: DB2 v9.7.0.0
-
-如果报找不到db2cli64.dll , 检查环境变量是否设置
-看是否能执行db2cli  
-```
-
-
-
-## 安装MYSQL驱动
-
-```
-go get -u github.com/go-sql-driver/mysql
-```
-
-
-
-# 数据库设计
-
-````
-使用SQLITE3数据库的messages.db ,含如下表:
-client_info 数据库连接配置表,记录需要监控的数据库连接地址及凭证信息
-dbmonsql 监控SQL配置表
-check_map 数据库和监控MAP表
-mail_cfg  邮件配置表
-check_result 数据库监控检查表(只保留当前数据),记录每一个数据库每一项监控的检查结果以及邮件发送时间
-check_his  数据库监控检查历史表, 类似check_result,它会保留所有监控记录
-详细见<<数据库设计.txt>>
-
-mail_cfg:
-
-````
-
-mail_cfg:
-
-| 字段            | 类型         | 必填       | 说明                                                 |
-| :-------------- | :----------- | :--------- | :--------------------------------------------------- |
-| `id`            | INTEGER      | 自增主键   | 配置记录 ID                                          |
-| `sender`        | VARCHAR(30)  | 是         | 发件人邮箱                                           |
-| `recipient`     | VARCHAR(100) | 是         | 收件人，支持多个地址（逗号/分号分隔）                |
-| `cc`            | VARCHAR(100) | 否         | 抄送，支持多个地址（逗号/分号分隔）                  |
-| `smtp_server`   | VARCHAR(30)  | 是         | SMTP 服务器地址                                      |
-| `smtp_port`     | INTEGER      | 是         | SMTP 端口（如 587、465）                             |
-| `smtp_user`     | VARCHAR(30)  | 是         | SMTP 登录用户名                                      |
-| `smtp_password` | VARCHAR(30)  | 是         | SMTP 登录密码                                        |
-| `isenable`      | INTEGER      | 否，默认 0 | 是否启用（1=启用，程序只读取 `isenable=1` 的第一条） |
-
-
-
-## 目标Oracle库监控用户及权限
-
-```
-grant connect , SELECT_CATALOG_ROLE to eamon identified by "Welcome1#123";
-```
-
-## 添加监控数据库
-
-client_info 中插入数据库;
-
-```
-INSERT INTO client_info VALUES(11,'1.1.1.191',1521,'ORACLE','racdb','jason','oracle',1);
-INSERT INTO client_info VALUES(12,'1.1.1.100',1521,'ORACLE','oradb','jason','oracle',1);
-```
-
-check_map中插入数据库和监控的关联;
-
-```
-sqlite> insert into check_map values(11,101,1);
-sqlite> insert into check_map values(12,101,1);
-sqlite> select * from v_map;
-```
-
-控制数据库是否启用:
-
-```
-update client_info set isenable=1 where id=NN;
-update check_map set isenable=1 where client_id=NN;
-```
-
-
-
-# proto文件
-
-建立 gpmon/grpc/proto/dbstatus.proto 文件
-
-```
-//grpc/proto/dbstatus.proto
-syntax = "proto3";
-option go_package = "./proto";
-package proto;
-
-import "google/protobuf/timestamp.proto";
-
-service DatabaseStatusService {
-    rpc SendStatus (DatabaseStatus) returns (DatabaseStatusResponse);
-}
-
-service ClientInfoService {
-    rpc GetClientInfo (ClientInfoRequest) returns (ClientInfoResponse);
-}
-
-message DatabaseStatus {
-    string ip = 1;
-    int32 port = 2; // 确保与ClientInfo中的port类型匹配
-    string dbtype = 3;
-    string dbnm = 4;
-    string checkNm = 5;  // 检查名称
-    string checkResult = 6; // 检查结果
-    string details = 7;
-    google.protobuf.Timestamp timestamp = 8;
-}
-
-message DatabaseStatusResponse {
-    string message = 1;
-}
-
-message ClientInfoRequest {
-    string DbType = 1; // 使用dbtype作为请求参数
-}
-
-message ClientInfoResponse {
-    repeated ClientInfo clientInfos = 1;
-}
-
-message ClientInfo {
-    string Ip = 1;
-    int32 Port = 2;
-    string DbType = 3;
-    string DbName = 4;
-    string DbUser = 5;
-    string UserPwd = 6;
-    bool IsEnable = 7;
-    int32 id = 8; 
-}
-
-```
-
-## 编译proto文件
-
-参见"安装 protoc和protoc-gen-go.md"内容,将google目录放在gpmon\grpc\下
-
-```
-cd gpmon/
-protoc -I grpc -I . --go_out=grpc --go_opt=paths=source_relative --go-grpc_out=grpc --go-grpc_opt=paths=source_relative grpc/proto/dbstatus.proto
-```
-
-会在gpmon/grpc/proto目录(和dbstatus.proto同级) 生成两个GO文件:  dbstatus.pb.go dbstatus_grpc.pb.go
-
-#还一种, 在gpmon/grpc下执行,但是只生成grpc/proto/dbstatus.pb.go 一个文件, 不知道是否可用
-
-```
-#protoc --go_out=plugins=grpc:. proto/dbstatus.proto
-```
-
-
-
-# 本地测试运行
-
-## SERVER端启动 gRPC 服务器
-
-```
-cd  mon-server
-SET CGO_ENABLED=1
-SET GOOS=windows
-SET GOARCH=amd64
-go run main.go
-```
-
-## 启动 gRPC 客户端
-
-在另一个终端中，启动oracle监控,注意防火墙
-
-```
-cd mon-client-ora
-go run startora.go 1.1.1.1
-#1.1.1.1 为serverip
-```
-
-分别在其他终端窗口，启动MYSQL及DB2监控
-
-```
-cd mon-client-db2
-go run startdb2.go 1.1.1.1
-cd mon-client-mysql
-go run startmysql.go 1.1.1.1
-```
-
-# LINUX端部署程序
-
-## Linux 安装go
-
-```
+```bash
+export PATH=$PATH:/usr/local/go/bin
 go env -w GO111MODULE=on
 go env -w GOPROXY=https://goproxy.cn,direct
-#GOPROXY=https://mirrors.aliyun.com/goproxy/
-
-验证网络:
-GO111MODULE=on GOPROXY=https://goproxy.cn,direct go list -m -json -versions golang.org/x/text@latest
-
 ```
 
-## Linux安装oracle instantclient
+### Oracle Instant Client
 
-```
-#for linux:
-#https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html
-解压到  /instantclient
-设置环境变量:
-vi .bash_profile
+下载：https://www.oracle.com/database/technologies/instant-client/
+
+```bash
+# Linux 示例
+unzip instantclient-basic-linux.x64-*.zip -d /instantclient
 export TNS_ADMIN=/instantclient
-export LD_LIBRARY_PATH=/instantclient
-
-ldconfig 
+export LD_LIBRARY_PATH=/instantclient:$LD_LIBRARY_PATH
+echo "/instantclient" >> /etc/ld.so.conf && ldconfig
 ```
 
-## Linux安装MYSQL驱动
+Windows 解压后设置 `TNS_ADMIN` 和 `LD_LIBRARY_PATH`（或 PATH）指向 instantclient 目录。
 
-```
-go get -u github.com/go-sql-driver/mysql
-```
+编译和运行 Oracle 相关组件需要 `CGO_ENABLED=1`。
 
-### Linux安装 DB2 驱动
+### DB2 clidriver
 
-https://github.com/ibmdb/go_ibm_db#how-to-install-in-linuxmac
+参考：https://github.com/ibmdb/go_ibm_db
 
-```
-go get github.com/ibmdb/go_ibm_db
+```bash
 go install github.com/ibmdb/go_ibm_db/installer@v0.4.3
-cd /root/go/pkg/mod/github.com/ibmdb/go_ibm_db@v0.4.3/installer
+cd $(go env GOPATH)/pkg/mod/github.com/ibmdb/go_ibm_db@v0.4.3/installer
 go run setup.go
-cd /root/go/pkg/mod/github.com/ibmdb
-cp -r clidriver /workspace/gpmon/local/
-
-
-vi  ~/.bash_profile 
-export TNS_ADMIN=/instantclient
-export LD_LIBRARY_PATH=/instantclient
+cp -r $(go env GOPATH)/pkg/mod/github.com/ibmdb/clidriver /workspace/gpmon/local/
 
 export IBM_DB_HOME=/workspace/gpmon/local/clidriver
 export CGO_CFLAGS=-I$IBM_DB_HOME/include
-export CGO_LDFLAGS=-L$IBM_DB_HOME/lib 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$IBM_DB_HOME/lib
-
-source  ~/.bash_profile
-echo $LD_LIBRARY_PATH
-
+export CGO_LDFLAGS=-L$IBM_DB_HOME/lib
+export LD_LIBRARY_PATH=$IBM_DB_HOME/lib:$LD_LIBRARY_PATH
 ```
 
+完整环境变量模板见 `install_cfg/bash_profile`。
 
+### 依赖说明
 
-## 部署源程序gpmon
+项目已包含 `go.mod` / `go.sum`，**不要**删除后重新 `go mod init`。依赖在首次编译时由 Go 自动拉取；离线环境可使用 vendor 目录。
 
-```
-mkdir /workspace/
-上传gpmon.zip 解压
-cd /workspace/gpmon
-mkdir log
-chmod -R 755 /gpmon
+| 数据库 | Go 驱动 |
+|--------|---------|
+| SQLite（配置库） | github.com/mattn/go-sqlite3 |
+| Oracle | github.com/godror/godror |
+| MySQL | github.com/go-sql-driver/mysql |
+| DB2 | github.com/ibmdb/go_ibm_db |
 
-rm go.mod
-rm go.sum
-go mod init mon
-go mod tidy
-```
+---
 
-## Linux端编译程序
+## 编译
 
-```
-#获取最新代码
-cd  /workspace/gpmon/
-git status
-git pull
+统一使用 `scripts/build.sh`，所有可执行文件输出到项目根目录。
 
-supervisorctl stop all
-
-#编译
-cd /workspace/gpmon/mon-server
-GOOS=linux GOARCH=amd64 go build -o startgpmon
-mv startgpmon ../
-
-cd /workspace/gpmon/mon-client-ora
-GOOS=linux GOARCH=amd64 go build -o orasvc
-mv orasvc ../
-
-cd /workspace/gpmon/mon-client-db2
-GOOS=linux GOARCH=amd64 go build -o db2svc
-mv db2svc ../
-
-cd /workspace/gpmon/mon-client-mysql
-GOOS=linux GOARCH=amd64 go build -o mysqlsvc
-mv mysqlsvc ../
-
-
-
-
-单独上传更新messages.db
-mv messages.db messages.db.bk
-ftp messages.db to gpmon/
-
-#启动服务
-supervisorctl start all
-
-#查看日志
-log/gpmon.log 等
-```
-
-## 部署SUPERVISOR
-
-```
-yum reinstall  gcc install openssl-devel bzip2-devel expat-devel gdbm-devel readline-devel zlib-devel libffi-devel  --downloadonl --downloaddir=/opt/soft/pkg
-
-yum install supervisor --downloadonl --downloaddir=/opt/soft/pkg
-#yum reinstall python-meld3  --downloadonl --downloaddir=/opt/soft/pkg
-
-#修改/etc/supervisord.conf
-将里面指向/tmp 改为/var/log
-grep "/tmp" /etc/supervisord.conf |grep -v "^;"
-
-#修改 /usr/bin/supervisord及/usr/bin/supervisorctl  第一行python 为python2
-vi /usr/bin/supervisorctl
-vi /usr/bin/supervisord
-python改为python2
-
-配置/etc/supervisord.d/gpmon.ini
-详细文件见:
-/etc/supervisord.d/db2svc.ini  gpmon.ini  mysqlsvc.ini  orasvc.ini
-
-需要修改db2svc.ini,mysqlsvc.ini orasvc.ini中的IP地址,替换位gpmon服务器地址;
-command=/workspace/gpmon/orasvc 1.1.1.1
-
-#配置完成后, 加载主配置文件
-#supervisord -c /etc/supervisord.conf
-systemctl stop supervisord.service
-systemctl start supervisord.service
-systemctl status supervisord.service
-
-#更新配置, 每次修改都需要更新
-supervisorctl update
-supervisorctl status
-
-systemctl enable supervisord
-systemctl start supervisord
-
-
-```
-
-### 常见supervisor错误:
-
-**问题:**
-
-手动执行 \gpmon\go run main.go 时正常;
-但使用 supervisorctl start  时马上退出:
-BACKOFF   Exited too quickly
-查看 err.log显示 :
-/workspace/gpmon/startgpmon: error while loading shared libraries: libdb2.so.1: cannot open shared object file: No such file or directory
-
-**解决:**  在所有ini中增加如下指定,
-
-environment=LD_LIBRARY_PATH="/workspace/gpmon/local/clidriver/lib:/instantclient"
-
-```
-vi /etc/supervisord.d/gpmon.ini
-[program:gpmon]
-; 命令执行的目录
-;directory=/workspace/gpmon
-directory=/
-; 运行程序的命令,要用绝对路径
-command=/workspace/gpmon/startgpmon
-environment=LD_LIBRARY_PATH="/workspace/gpmon/local/clidriver/lib:/instantclient"
-
-
-supervisorctl update
-supervisorctl status
-
-```
-
-
-
-**其它报错问题**
-
-```
-4.1 报错 unix:///var/run/supervisor.sock no such file
-方案1:
-（1）先停止supervisor
-systemctl sotp supervisor.service
-1
-（2）然后查看是否有supervisord进程没有结束
-ps ax |grep supervisor
-1
-如果有进程没结束就手动杀死
-kill -9 [pid]
-1
-（3）使用以下命令，重新加载配置文件。整个服务会自动启动
-supervisord -c /etc/supervisor/supervisord.conf
-#或
-/usr/bin/python2 /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
-1
-2
-3
-方案2：
-（1）问题原因是文件被系统删除，可以手动创建sock文件。然后重新加载配置
-sudo touch /var/run/supervisor.sock
-sudo chmod 777 /var/run/supervisor.sock
-supervisord -c /etc/supervisor/supervisord.conf
-1
-2
-3
-（2）然后查看supervisord的进程，如果有重复进程需要进行查杀，否则cpu占用率可能会比较高。
-ps ax |grep supervisor
-#如果有多余进程没结束就手动杀死
-kill -9 [pid]
-1
-2
-3
-4.2 报错 Error: Another program is already listening on a port that one of our HTTP servers is configured to use. Shut this program down first before starting supervisord
-（1）尝试关闭配置文件中包含的所有服务
-
-supervisorctl status
-supervisorctl stop [programName]
-1
-2
-（2）如果关闭不掉，试用命令ps ax |grep supervisor 查看pid，杀掉所有查看到的进程。
-
-ps ax |grep supervisor
-kill -9 [pid]
-1
-2
-（3）如果还是报错，取消socket的软连接。注意，下方的路径是在supervisord.conf中声明的。
-
-unlink /var/run/supervisor.sock
-unlink /tmp/supervisor.sock 
-supervisord -c /etc/supervisor/supervisord.conf
-1
-2
-3
-4.3 cpu占用率过高的问题
-(1) 使用以下命令查看是否有重复启动的配置文件
-
-ps -ax |grep supervisor
-1
-(2) 使用kill命令杀掉多余的进程，只保留以一个
-
-ps ax |grep supervisor
-#如果有多余进程没结束就手动杀死
-kill -9 [pid]
-1
-2
-3
-(3) 如果还是占用率过高，使用以下命令编辑配置文件，把http服务注释掉
-
-vim /etc/supervisor/supervisor.conf
-1
-4.4 报错 [line 57]: ‘json module not found, using jsonujson module not found, using jsonujson module not found, using json\n’
-此问题不是json模块找不到，是配置文件格式不对，仔细检查或重写配置文件就能搞定。
-
-https://blog.csdn.net/dorlolo/article/details/119336687
-```
-
-
-
-
-
-# 用户端部署GPMON:
-
-```
---client
-systemctl stop firewalld
-systemctl disable firewalld
-
-unzip instantclient-basic-linux.x64-19.20.0.0.0dbru.zip 
-mv instantclient_19_20/  /opt/instantclient
-chmod -R 775 /opt/instantclient
-
-cp install_cfg/bash_profile  ~/.bash_profile 
-
-. ~/.bash_profile 
-echo "/opt/instantclient" >> /etc/ld.so.conf
-ldconfig
-
---server
-systemctl stop firewalld
-systemctl disable firewalld
-
-```
-
-# 运维脚本
-
-```
-gpmon/
-├── send_mail_cli.go              # 邮件工具源码
-├── send_mail_cli                 # 邮件工具可执行文件
-├── scripts/ # 关键运维脚本
-│ ├── build-mail-tool.sh # ✉️ 编译邮件工具
-│ ├── db-maintenance.sh # 🛠️ 数据库维护脚本
-│ ├── send-daily-report.sh # 📧 日报发送脚本
-│ ├── setup-logrotate.sh # 🔄 日志轮转安装脚本
-│ └── setup-maintenance.sh # ⚙️ 定时任务&环境安装脚本
-```
-
-### 一键部署流程
-
-```
+```bash
 cd /workspace/gpmon
 
-# 1. 编译邮件工具
+# 编译全部（推荐）
+./scripts/build.sh
+
+# 仅编译监控服务
+./scripts/build.sh --server
+
+# 仅编译客户端（Oracle + MySQL + DB2）
+./scripts/build.sh --clients
+
+# 不编译 DB2 客户端
+./scripts/build.sh --clients --skip-db2
+
+# 仅编译邮件工具
+./scripts/build.sh --mail
+# 或
 ./scripts/build-mail-tool.sh
+```
 
-# 2. 设置日志轮转（独立功能）
-./scripts/setup-logrotate.sh
+### 编译说明
 
-# 3. 设置运维定时任务
-./scripts/setup-maintenance.sh   # 安装 / 更新定时任务、环境变量
+各组件按需编译，**gRPC 服务端不依赖 DB2/Oracle 客户端库**：
 
-# 4. 验证
-# 测试邮件配置
+| 组件 | 编译标签 | 额外依赖 |
+|------|----------|----------|
+| startgpmon | 无 | SQLite（CGO） |
+| orasvc | `oracle` | Oracle Instant Client |
+| mysqlsvc | `mysql` | 无（纯 Go 驱动） |
+| db2svc | `db2` | DB2 clidriver（`IBM_DB_HOME`） |
+| send_mail_cli | 无 | SQLite（CGO） |
+
+DB2 编译前需配置环境变量（参考 `install_cfg/bash_profile`）：
+
+```bash
+export IBM_DB_HOME=/workspace/gpmon/local/clidriver
+export CGO_CFLAGS=-I$IBM_DB_HOME/include
+export CGO_LDFLAGS=-L$IBM_DB_HOME/lib
+export LD_LIBRARY_PATH=$IBM_DB_HOME/lib:$LD_LIBRARY_PATH
+```
+
+若服务器未安装 DB2 clidriver，可跳过 DB2 客户端编译，不影响其他组件。
+
+Windows 本地编译示例：
+
+```bat
+set CGO_ENABLED=1
+set GOOS=windows
+set GOARCH=amd64
+scripts\build.sh --mail
+```
+
+### 更新部署
+
+```bash
+cd /workspace/gpmon
+git pull
+supervisorctl stop all
+./scripts/build.sh
+supervisorctl start all
+```
+
+---
+
+## 部署与运行
+
+### Supervisor 配置
+
+配置模板位于 `install_cfg/supervisord.d/`：
+
+| 文件 | 程序 | 命令示例 |
+|------|------|----------|
+| gpmon.ini | gRPC 服务 | `/workspace/gpmon/startgpmon` |
+| orasvc.ini | Oracle 客户端 | `/workspace/gpmon/orasvc <server_ip>` |
+| mysqlsvc.ini | MySQL 客户端 | `/workspace/gpmon/mysqlsvc <server_ip>` |
+| db2svc.ini | DB2 客户端 | `/workspace/gpmon/db2svc <server_ip>` |
+
+部署步骤：
+
+```bash
+cp install_cfg/supervisord.d/*.ini /etc/supervisord.d/
+
+# 修改以下内容：
+# 1. command 中的路径和服务器 IP
+# 2. environment 中的 LD_LIBRARY_PATH（Oracle + DB2 库路径）
+
+supervisorctl update
+supervisorctl status
+```
+
+**重要**：Supervisor 不会继承 shell 环境变量，必须在 ini 中显式设置：
+
+```ini
+environment=LD_LIBRARY_PATH="/workspace/gpmon/local/clidriver/lib:/instantclient"
+```
+
+### 日志位置
+
+```
+/workspace/gpmon/log/gpmon.log          # 服务端日志
+/workspace/gpmon/log/orasvc.error.log   # Oracle 客户端错误日志
+/workspace/gpmon/log/mysqlsvc.error.log
+/workspace/gpmon/log/db2svc.error.log
+```
+
+### 防火墙
+
+监控客户端需能访问服务端 gRPC 端口 **5051**。
+
+---
+
+## 运维脚本
+
+```
+scripts/
+├── build.sh               # 统一编译
+├── build-mail-tool.sh     # 编译邮件工具
+├── send-daily-report.sh   # 日报生成与发送
+├── db-maintenance.sh      # 数据库维护
+├── setup-maintenance.sh   # 安装定时任务
+└── setup-logrotate.sh     # 安装日志轮转
+```
+
+### 一键安装运维环境
+
+```bash
+sudo ./scripts/setup-maintenance.sh --setup    # 定时任务 + 日志目录
+sudo ./scripts/setup-logrotate.sh              # 日志轮转
+```
+
+安装后的定时任务（`/etc/cron.d/gpmon-maintenance`）：
+
+```
+# 每天 08:00 发送监控日报
+0 8 * * * root /workspace/gpmon/scripts/send-daily-report.sh --send
+
+# 每天 02:00 数据库维护（清理 + 备份）
+0 2 * * * root /workspace/gpmon/scripts/db-maintenance.sh --full --force
+```
+
+### 日常操作
+
+```bash
+# 查看系统状态
+./scripts/db-maintenance.sh --status
+
+# 测试邮件
 ./scripts/send-daily-report.sh --test-mail
-
-# 手动触发数据库维护
-./scripts/db-maintenance.sh --full --force
 
 # 手动发送日报
 ./scripts/send-daily-report.sh --send
+
+# 手动维护
+./scripts/db-maintenance.sh --full --force
 ```
 
-### 脚本功能说明
-
-#### 1. db-maintenance.sh - 核心运维脚本
-
-主要功能：
-
-- 数据库维护（清理过期数据、备份、优化）
-
-- 监控日报生成和发送
-
-- 系统状态查看
-
-- 备份管理
-
-
-
-###  使用logrotate定期清理日志
-
-#### setup-logrotate.sh - 日志轮转设置
-
-功能： 配置系统logrotate服务自动管理GPMon日志文件
-
-使用方法：
+### 运维日志
 
 ```
-# 设置日志轮转（需要root权限）
-sudo ./scripts/setup-logrotate.sh
-
-# 手动测试日志轮转
-sudo logrotate -f /etc/logrotate.d/gpmon
-
-# 查看轮转配置
-sudo logrotate -d /etc/logrotate.d/gpmon
+/var/log/gpmon-maintenance.log     # 维护脚本日志
+/var/log/gpmon-daily-report.log    # 日报脚本日志
+/workspace/gpmon/log/*.log         # 应用日志（logrotate 管理）
 ```
 
-轮转策略：
+---
 
-- 每天轮转一次
+## 数据库配置
 
-- 保留7天的日志文件
+使用 SQLite 数据库 `messages.db`，主要表：
 
-- 文件超过10M立即轮转
+| 表名 | 说明 |
+|------|------|
+| client_info | 被监控数据库连接配置 |
+| dbmonsql | 监控 SQL 配置 |
+| check_map | 数据库与监控项关联 |
+| mail_cfg | 邮件发送配置 |
+| check_result | 当前监控结果 |
+| check_his | 监控历史记录 |
 
-- 自动压缩旧日志
+### mail_cfg 邮件配置表
 
-- 自动删除30天前的日志
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | INTEGER | 自增主键 | 配置记录 ID |
+| sender | VARCHAR(30) | 是 | 发件人邮箱 |
+| recipient | VARCHAR(100) | 是 | 收件人，多个地址用逗号/分号分隔 |
+| cc | VARCHAR(100) | 否 | 抄送，多个地址用逗号/分号分隔 |
+| smtp_server | VARCHAR(30) | 是 | SMTP 服务器 |
+| smtp_port | INTEGER | 是 | SMTP 端口 |
+| smtp_user | VARCHAR(30) | 是 | SMTP 用户名 |
+| smtp_password | VARCHAR(30) | 是 | SMTP 密码 |
+| isenable | INTEGER | 默认 0 | 1=启用，程序读取第一条启用记录 |
 
-#### build-mail-tool.sh - 邮件工具编译
+### 添加监控数据库
 
-功能： 编译邮件发送工具，支持HTML邮件发送
+```sql
+-- 添加数据库连接
+INSERT INTO client_info VALUES(11,'1.1.1.191',1521,'ORACLE','racdb','jason','oracle',1);
 
-使用方法：
+-- 关联监控项
+INSERT INTO check_map VALUES(11, 101, 1);
 
-```
-# 编译邮件工具
-./scripts/build-mail-tool.sh
-
-# 编译完成后会自动测试邮件配置
-```
-
-### 自动化定时任务
-
-设置完成后，系统会自动配置以下定时任务：
-
-```
-cat /etc/cron.d/gpmon*
-
-# 每天早上8点: 发送监控状态日报
-0 8 * * * root /workspace/gpmon/scripts/send-daily-report.sh --send-report
-
-# 每天凌晨2点: 执行维护任务（数据清理+备份）
-0 2 * * * root /workspace/gpmon/scripts/db-maintenance.sh --daily-tasks --force
-```
-
-### 日常运维操作
-
-#### 查看系统状态
-
-```
-./scripts/db-maintenance.sh --status
+-- 启用
+UPDATE client_info SET isenable=1 WHERE id=11;
+UPDATE check_map SET isenable=1 WHERE client_id=11;
 ```
 
-显示内容包括：
+### Oracle 监控用户权限
 
-- 📊 数据库信息（大小、记录数、可清理数据）
-
-- 📈 当前监控状态（正常/错误/警告统计）
-
-- 💾 备份信息（备份数量、大小、最新备份时间）
-
-- 📧 邮件工具状态
-
-- ⏰ 定时任务配置状态
-
-#### 手动维护操作
-
-```
-# 完整维护（推荐）
-./scripts/db-maintenance.sh --daily-tasks
-
-# 单独操作
-./scripts/db-maintenance.sh --clean-db      # 只清理数据
-./scripts/db-maintenance.sh --backup-db     # 只备份数据库
+```sql
+GRANT CONNECT, SELECT_CATALOG_ROLE TO eamon IDENTIFIED BY "password";
 ```
 
-#### 备份管理
+---
 
-```
-# 查看备份列表
-./scripts/gpmon-maintenance.sh --list-backups
+## 本地开发调试
 
-# 测试备份完整性
-./scripts/gpmon-maintenance.sh --test-backups
+### 启动 gRPC 服务
 
-# 清理过期备份
-./scripts/gpmon-maintenance.sh --cleanup-backups
+```bash
+cd mon-server
+CGO_ENABLED=1 go run main.go
 ```
 
-### 日志文件位置
+### 启动监控客户端
 
-```
-# 运维日志
-/var/log/gpmon-maintenance.log
-
-# 邮件报告日志
-/var/log/gpmon-daily-report.log
-
-# 应用日志（由logrotate管理）
-/workspace/gpmon/log/*.log
-
-# 日志轮转日志
-/var/log/gpmon-rotation.log
+```bash
+# 另开终端，<server_ip> 为 gRPC 服务地址
+cd mon-client-ora && go run startora.go <server_ip>
+cd mon-client-mysql && go run startmysql.go <server_ip>
+cd mon-client-db2 && go run startdb2.go <server_ip>
 ```
 
+---
 
+## Proto 编译
 
-### 重要提醒
+仅在修改 `grpc/proto/dbstatus.proto` 后需要重新生成：
 
-- 首次部署：必须按顺序执行编译邮件工具 → 设置日志轮转 → 设置运维任务
-- 权限要求：setup-logrotate.sh 和 gpmon-maintenance.sh --setup 需要sudo权限
-- 邮件配置：确保数据库中 mail_cfg 表有正确的邮件服务器配置
-- 磁盘空间：定期检查 backup 目录的磁盘空间
-- 功能分离：日志轮转由系统logrotate服务管理，数据库维护由定时任务管理
-
-
-
-
-# GIT
-
-## --初始化一个新的Git仓库
-
-```
-cd D:\Workspace\gpmon
-git init
+```bash
+cd gpmon/
+protoc -I grpc -I . \
+  --go_out=grpc --go_opt=paths=source_relative \
+  --go-grpc_out=grpc --go-grpc_opt=paths=source_relative \
+  grpc/proto/dbstatus.proto
 ```
 
-## --添加文件到Git仓库
+生成文件：`grpc/proto/dbstatus.pb.go`、`grpc/proto/dbstatus_grpc.pb.go`
 
-```
-#WIN环境设置 CRLF(\r\n)上传后自动转为LF(\n)
-git config --global core.autocrlf true
+---
 
-#
-git config --global user.email "yongzhi.m@gmail.com"
-git config --global user.name "Jason Ma"
-#去除M
-git config --global core.whitespace cr-at-eol
+## 常见问题
 
-#添加本地文件
-git add .
-```
+### godror 编译错误（undefined: VersionInfo 等）
 
-
-
-## 获取更新
-
-```
-git pull
-git status
-红色表示未commit , 绿色表示未push
-```
-
-## 获取更新--强制覆盖本地
-
-```
-git reset --hard
-git pull
-不保留本地的修改，直接覆盖
-```
-
-## 获取更新--保存本地(放入缓存中)
-
-```
-git stash
-git pull 
-git stash pop
-解析：
-git stash: 将改动藏起来
-git pull:用新代码覆盖本地代码
-git stash pop: 将刚藏起来的改动恢复
-这样操作的效果是在最新的仓库代码的基础仍保留本地的改动
-```
-
-## 提交更改
-
-```
-git add .
-git commit -m "release 3.1 , 增加通过数据库和监控MAP表check_map来控制数据库监控项配置"
-```
-
-## 上传更改
-
-```
-git push
-git status
-```
-
-
-
-## 其它操作
-
-### 创建分支（可选）
-
-Git允许您创建分支来隔离功能开发或修复错误。例如，如果您想添加一个新功能，可以创建一个新分支
-
-```
-git checkout -b new-feature-branch
-```
-
-### 查看更改历史
-
-```
-git log
-```
-
-### 回退更改
-
-如果需要，您可以回退到先前的提交。首先，使用`git log`找到您想要回退到的提交的哈希值，然后执行
-
-```
-git checkout [commit_hash]
-替换[commit_hash]为您从git log中获得的实际哈希值。
-```
-
-
-
-# Issue
-
-## issue1: godror错误
-
-```
-go run main.go
-# github.com/godror/godror
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:558:19: undefined: VersionInfo
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:559:19: undefined: VersionInfo
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:560:10: undefined: StartupMode
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:561:11: undefined: ShutdownMode
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:563:31: undefined: Event
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:563:42: undefined: SubscriptionOption
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:563:64: undefined: Subscription
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:564:31: undefined: ObjectType
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:565:59: undefined: Data
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:566:28: undefined: DirectLob
-C:\Program Files\Go\pkg\mod\github.com\godror\godror@v0.40.3\orahlp.go:566:28: too many errors
-
-解决:
-确保godror正确安装
-go get github.com/godror/godror@latest
-设置变量
+```bash
 go env -w CGO_ENABLED=1
-SET GOOS=windows
-SET GOARCH=amd64
-go run main.go
+go get github.com/godror/godror@latest
 ```
 
-## issue2: gcc: error: unrecognized
+### DPI-1047: Cannot locate Oracle Client library
 
-```
-D:\Workspace\gpmon\mon-client>go run main.go
-# runtime/cgo
-gcc: error: x86_64: No such file or directory
-gcc: error: unrecognized command line option '-arch'; did you mean '-march='?
+检查 Instant Client 是否安装，环境变量 `TNS_ADMIN`、`LD_LIBRARY_PATH` 是否指向正确目录。Supervisor 需在 ini 中配置 `environment=LD_LIBRARY_PATH=...`。
 
-解决:
-SET GOOS=windows
-// SET GOARCH=amd64
-go run main.go
+### libdb2.so.1: cannot open shared object file
+
+Supervisor 启动时未加载 DB2 库路径，在 ini 中添加：
+
+```ini
+environment=LD_LIBRARY_PATH="/workspace/gpmon/local/clidriver/lib:/instantclient"
 ```
 
+### 客户端连接被拒绝（dial tcp :5051: connection refused）
 
+确认 gRPC 服务已启动，防火墙放行 5051，客户端 IP 参数正确。Supervisor 下手动 `go run` 正常但 supervisor 失败，通常是环境变量未配置。
 
-## issue3:  ORA-00000: DPI-1047
+### go mod tidy 超时
 
-```
-Details: ORA-00000: DPI-1047: Cannot locate a 64-bit Oracle Client library: "libclntsh.so: cannot open shared object file: No such file or directory". See https://oracle.github.io/odpi/doc/installation.html#linux for help
-解决:
-检查instantclient是否安装
-检查环境变量~/.bash_profile及/etc/profile 中TNS_ADMIN及LD_LIBRARY_PATH是否设置
-echo $TNS_ADMIN
-/instantclient
-cd $LD_LIBRARY_PATH
-/instantclient
-
-
-
+```bash
+go env -w GOPROXY=https://goproxy.cn,direct
 ```
 
-## issue4: go mod tidy问题
+### supervisor.sock no such file
 
-```
-go mod tidy时报
-go mod ...github.com/godror/godror i/o timeout dial tcp: lookup...
-解决:
-检查网络是否通畅
-ping goproxy.cn
-或者用ip代替 goproxy.cn
-如果外网不通,检查 /etc/resolv.conf
-# Generated by NetworkManager
-nameserver 198.18.0.2
-nameserver 192.168.31.1
-可能要重启下虚机
+修改 `/etc/supervisord.conf`，将 socket 路径从 `/tmp` 改为 `/var/log`。
+
+### 启动后无日志也无报错
+
+检查是否已添加 `check_map` 关联监控项；仅有 `client_info` 记录不够。
+
+### sqlite3 终端中文乱码（Windows）
+
+```bat
+chcp 65001
 ```
 
-## issue5: sqlite3 终端中文乱码问题
+---
 
-```
-chcp 65001        （将编码方式改为UTF-8）
-chcp 936            （将编码方式改回GBK）
-```
+## Git 操作参考
 
-## issue6: transport: Error while dialing: dial tcp
+```bash
+# 获取更新
+git pull
 
-```
-客户端程序执行显示
-Failed to retrieve configurations: rpc error: code = Unavailable desc = connection error: desc = "transport: Error while dialing: dial tcp 1.1.1.9:5051: connect: connection refused"
+# 提交
+git add .
+git commit -m "描述"
+git push
 
-解决:
-手动执行 go run 试试, 疑似环境变量问题
+# 强制覆盖本地（不保留本地修改）
+git reset --hard && git pull
 
-```
-
-## issue7: unix:///tmp/supervisor.sock no such file
-
-```
-supervisorctl 提示:
-unix:///tmp/supervisor.sock no such file
-
-原因为tmp/下文件被自动清理
-
-
-解决:
-#修改/etc/supervisord.conf
-将里面指向/tmp 改为/var/log
-grep "/tmp" /etc/supervisord.conf |grep -v "^;"
+# 保留本地修改后拉取
+git stash && git pull && git stash pop
 ```
 
-### issu8: 启动后无日志输出也没报错
+---
 
-添加数据库client_info后,没有添加check_map;
+## 模块说明
 
-
-
-# TMP
-
-```
-
-```
-
+| 路径 | 说明 |
+|------|------|
+| db/oradb.go, db2db.go, mysqldb.go | 各数据库监控 SQL 执行 |
+| db/serverdb.go | SQLite 交互、邮件发送状态管理 |
+| grpc/server.go | gRPC 服务端实现 |
+| mon-client-*/start*.go | 各数据库监控客户端入口 |
+| mon-server/main.go | gRPC 服务入口，监听 5051 |
+| utils/mail.go | 告警邮件发送 |

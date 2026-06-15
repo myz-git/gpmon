@@ -1,0 +1,8 @@
+# Shell scripts must use LF on all platforms
+*.sh text eol=lf
+
+# Go source
+*.go text eol=lf
+
+# Config templates used on Linux
+install_cfg/** text eol=lf
