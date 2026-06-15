@@ -8,6 +8,7 @@
 - [快速开始（生产部署）](#快速开始生产部署)
 - [环境准备](#环境准备)
 - [编译](#编译)
+- [编译产物打包](#编译产物打包)
 - [部署与运行](#部署与运行)
 - [运维脚本](#运维脚本)
 - [数据库配置](#数据库配置)
@@ -76,23 +77,27 @@ git pull
 cp install_cfg/bash_profile ~/.bash_profile   # 按实际路径修改后 source
 source ~/.bash_profile
 
-# 3. 编译全部组件
+# 3. 修复脚本换行符（Windows 上传时可能需要）
+sed -i 's/\r$//' scripts/*.sh install_cfg/bash_profile install_cfg/supervisord.d/*.ini
 chmod +x scripts/*.sh
+
+# 4. 加载编译环境并编译全部组件
+source <(sed 's/\r$//' install_cfg/bash_profile)   # 按实际路径修改后使用
 ./scripts/build.sh
 
-# 4. 配置 Supervisor 并启动监控服务
+# 5. 配置 Supervisor 并启动监控服务
 cp install_cfg/supervisord.d/*.ini /etc/supervisord.d/
 # 修改 ini 中的服务器 IP 和路径
 supervisorctl update
 supervisorctl start all
 
-# 5. 安装运维定时任务（日报 + 数据库维护）
+# 6. 安装运维定时任务（日报 + 数据库维护）
 sudo ./scripts/setup-maintenance.sh --setup
 
-# 6. 安装日志轮转（可选）
+# 7. 安装日志轮转（可选）
 sudo ./scripts/setup-logrotate.sh
 
-# 7. 验证
+# 8. 验证
 ./scripts/db-maintenance.sh --status
 ./scripts/send-daily-report.sh --test-mail
 ```
@@ -146,9 +151,24 @@ export LD_LIBRARY_PATH=$IBM_DB_HOME/lib:$LD_LIBRARY_PATH
 
 完整环境变量模板见 `install_cfg/bash_profile`。
 
-### 依赖说明
+### 依赖与 vendor
 
-项目已包含 `go.mod` / `go.sum`，**不要**删除后重新 `go mod init`。依赖在首次编译时由 Go 自动拉取；离线环境可使用 vendor 目录。
+项目已包含 `go.mod` / `go.sum`，**不要**删除后重新 `go mod init`。
+
+| 场景 | 说明 |
+|------|------|
+| 有网络 | 服务器直接 `go build`，按 `go.mod` 拉取依赖 |
+| 离线/版本锁定 | 开发机执行 `go mod vendor`，将 `vendor/` 目录一并部署到服务器 |
+| 版本漂移 | 无 `vendor/` 时，服务器可能拉到与开发机不同的依赖版本（如 `go_ibm_db` v0.5.x） |
+
+开发机刷新 vendor：
+
+```bash
+go mod tidy
+go mod vendor
+```
+
+仓库通过 `.gitattributes` 约定 `*.sh`、`install_cfg/**` 使用 LF 换行，避免 Linux 上出现 `$'\r': command not found`。
 
 | 数据库 | Go 驱动 |
 |--------|---------|
@@ -207,7 +227,19 @@ export LD_LIBRARY_PATH=$IBM_DB_HOME/lib:$LD_LIBRARY_PATH
 
 若服务器未安装 DB2 clidriver，可跳过 DB2 客户端编译，不影响其他组件。
 
-Windows 本地编译示例：
+编译客户端前，`build.sh` 会自动加载 `install_cfg/bash_profile` 中的 Oracle/DB2 环境变量。仅编服务端（`--server`）时不需要 DB2 头文件。
+
+### 编译选项速查
+
+| 命令 | 产出 |
+|------|------|
+| `./scripts/build.sh` | 全部 5 个可执行文件 |
+| `./scripts/build.sh --server` | 仅 `startgpmon` |
+| `./scripts/build.sh --clients` | `orasvc` + `mysqlsvc` + `db2svc` |
+| `./scripts/build.sh --clients --skip-db2` | `orasvc` + `mysqlsvc` |
+| `./scripts/build.sh --mail` | 仅 `send_mail_cli` |
+
+Windows 本地编译示例（仅邮件工具等无需 Oracle/DB2 的组件）：
 
 ```bat
 set CGO_ENABLED=1
@@ -221,6 +253,7 @@ scripts\build.sh --mail
 ```bash
 cd /workspace/gpmon
 git pull
+sed -i 's/\r$//' scripts/*.sh install_cfg/bash_profile 2>/dev/null
 supervisorctl stop all
 ./scripts/build.sh
 supervisorctl start all
@@ -228,8 +261,41 @@ supervisorctl start all
 
 ---
 
-## 部署与运行
+## 编译产物打包
 
+编译完成后，可在项目根目录将可执行文件打成 zip，便于分发到其他同类 Linux 服务器。
+
+### 仅打包可执行文件
+
+```bash
+cd /workspace/gpmon
+
+zip -j gpmon-bin-$(date +%Y%m%d).zip \
+  startgpmon orasvc mysqlsvc db2svc send_mail_cli
+```
+
+### 连同配置一起打包（适合首次部署）
+
+```bash
+zip -r gpmon-deploy-$(date +%Y%m%d).zip \
+  startgpmon orasvc mysqlsvc db2svc send_mail_cli \
+  install_cfg/ messages.db
+```
+
+### 解压与权限
+
+```bash
+unzip gpmon-bin-20250615.zip -d /workspace/gpmon/
+chmod +x /workspace/gpmon/{startgpmon,orasvc,mysqlsvc,db2svc,send_mail_cli}
+```
+
+未安装 zip 时可用 `tar czvf gpmon-bin-$(date +%Y%m%d).tar.gz ...` 代替。
+
+**注意**：二进制需在目标操作系统上编译（Linux amd64 编出的文件不能在 Windows 上运行）。
+
+---
+
+## 部署与运行
 ### Supervisor 配置
 
 配置模板位于 `install_cfg/supervisord.d/`：
@@ -357,6 +423,8 @@ sudo ./scripts/setup-logrotate.sh              # 日志轮转
 | smtp_password | VARCHAR(30) | 是 | SMTP 密码 |
 | isenable | INTEGER | 默认 0 | 1=启用，程序读取第一条启用记录 |
 
+告警邮件（`utils/mail.go`）和日报邮件（`send_mail_cli`）均支持 `recipient`、`cc` 字段填写多个地址，逗号或分号分隔。
+
 ### 添加监控数据库
 
 ```sql
@@ -417,6 +485,43 @@ protoc -I grpc -I . \
 
 ## 常见问题
 
+### 脚本执行报错 `/bin/bash^M` 或 `$'\r': command not found`
+
+Windows 换行符（CRLF）导致。处理：
+
+```bash
+sed -i 's/\r$//' scripts/*.sh install_cfg/bash_profile install_cfg/supervisord.d/*.ini
+```
+
+### 编 startgpmon 时报 sqlcli1.h: No such file or directory
+
+旧版代码会将 DB2 驱动编入服务端。确认 `db/db2db.go` 首行为 `//go:build db2`，并使用 `./scripts/build.sh --server` 单独编译服务端。
+
+### 全量编译没有生成 db2svc
+
+常见原因：
+
+1. `install_cfg/bash_profile` 加载失败（CRLF）——编译在客户端阶段中断
+2. 未配置 `IBM_DB_HOME` 或缺少 `include/sqlcli1.h`——脚本在 DB2 检查处退出
+3. 使用了 `--server` 或 `--skip-db2`
+
+检查：
+
+```bash
+echo "IBM_DB_HOME=$IBM_DB_HOME"
+ls $IBM_DB_HOME/include/sqlcli1.h
+```
+
+### git pull 提示本地修改冲突
+
+手动改过与远程相同的文件时：
+
+```bash
+git checkout -- db/db2db.go db/mysqldb.go db/oradb.go
+rm -f db/checkitem.go scripts/build.sh   # 若为未跟踪的冲突文件
+git pull
+```
+
 ### godror 编译错误（undefined: VersionInfo 等）
 
 ```bash
@@ -468,6 +573,9 @@ chcp 65001
 # 获取更新
 git pull
 
+# 服务器 SSH 密钥未配置时，参考 GitHub Settings → SSH keys
+# 或改用 HTTPS：git remote set-url origin https://github.com/myz-git/gpmon.git
+
 # 提交
 git add .
 git commit -m "描述"
@@ -477,7 +585,7 @@ git push
 git reset --hard && git pull
 
 # 保留本地修改后拉取
-git stash && git pull && git stash pop
+git stash push -u -m "backup" && git pull && git stash drop
 ```
 
 ---
@@ -486,9 +594,13 @@ git stash && git pull && git stash pop
 
 | 路径 | 说明 |
 |------|------|
-| db/oradb.go, db2db.go, mysqldb.go | 各数据库监控 SQL 执行 |
+| db/checkitem.go | 监控检查项公共类型 |
+| db/oradb.go | Oracle 监控（`//go:build oracle`） |
+| db/mysqldb.go | MySQL 监控（`//go:build mysql`） |
+| db/db2db.go | DB2 监控（`//go:build db2`） |
 | db/serverdb.go | SQLite 交互、邮件发送状态管理 |
-| grpc/server.go | gRPC 服务端实现 |
+| grpc/server.go | gRPC 服务端实现，调用 `utils.SendEmail` 发告警 |
 | mon-client-*/start*.go | 各数据库监控客户端入口 |
 | mon-server/main.go | gRPC 服务入口，监听 5051 |
-| utils/mail.go | 告警邮件发送 |
+| utils/mail.go | 告警邮件发送，支持多收件人/抄送 |
+| send_mail_cli.go | 日报 HTML 邮件发送工具 |

@@ -103,9 +103,11 @@ cd "$PROJECT_ROOT"
 mkdir -p "$PROJECT_ROOT/log"
 
 load_native_env() {
-    if [ -f "$PROJECT_ROOT/install_cfg/bash_profile" ]; then
+    local profile="$PROJECT_ROOT/install_cfg/bash_profile"
+    if [ -f "$profile" ]; then
+        # 去除 Windows 换行符后再加载，避免 $'\r': command not found
         # shellcheck source=/dev/null
-        . "$PROJECT_ROOT/install_cfg/bash_profile"
+        . <(sed 's/\r$//' "$profile")
     fi
 }
 
